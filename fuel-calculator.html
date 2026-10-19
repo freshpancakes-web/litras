@@ -240,6 +240,7 @@ details[open] summary { margin-bottom: 14px; }
 .sugg button:hover, .sugg button:focus-visible { background: var(--accent-soft); outline-offset: -2px; }
 .pin { display: flex; align-items: center; justify-content: center; background: var(--accent); color: var(--accent-ink); border: 2px solid var(--surface); border-radius: 50%; font: 600 12px/1 var(--font); box-shadow: 0 1px 5px rgba(0,0,0,.45); }
 .leaflet-container { font: inherit; background: var(--bg); }
+.osm-dark .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.9) contrast(.85) saturate(.6); }
 .leaflet-container .leaflet-control-attribution { background: color-mix(in srgb, var(--surface) 88%, transparent); color: var(--muted); font-size: 11px; }
 .leaflet-container .leaflet-control-attribution a { color: var(--accent); }
 .leaflet-bar a, .leaflet-bar a:hover { background: var(--surface); color: var(--ink); border-bottom-color: var(--line); }
@@ -680,6 +681,8 @@ function initMap() {
 // A page opened from a file has none, and gets an "Access blocked" picture back instead of tiles, so those
 // pages always use CARTO (same OSM data). On http(s) pages the light theme tries OpenStreetMap first and
 // falls back to CARTO on error; OpenStreetMap has no dark style, so the dark theme uses CARTO dark_all.
+// CARTO's keyless tiles only show an "API key required" picture, so without a key (the GitHub Pages copy)
+// both themes use OpenStreetMap, and the dark theme darkens its tiles with a CSS filter (.osm-dark).
 const MAP_CREDIT = "&copy; OpenStreetMap contributors";
 let tileLayer = null, osmFailed = false;
 const cartoUrl = (style) => CARTO_KEY
@@ -692,7 +695,9 @@ function applyMapTheme() {
   if (!map) return;
   if (tileLayer) map.removeLayer(tileLayer);
   const web = location.protocol === "http:" || location.protocol === "https:";
-  if (web && !isDark() && !osmFailed) {
+  const useOsm = web && (!isDark() || !CARTO_KEY) && !osmFailed;
+  map.getContainer().classList.toggle("osm-dark", useOsm && isDark());
+  if (useOsm) {
     const osm = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 19, referrerPolicy: "origin", attribution: MAP_CREDIT
     });
