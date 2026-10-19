@@ -1,0 +1,10 @@
+# Local only: holds the CARTO key
+config.js
+
+# Local copies and output
+DK-*.xlsx
+update_prices.log
+fuel-calculator.before-redesign.html
+brag-output*/
+__pycache__/
+.DS_Store

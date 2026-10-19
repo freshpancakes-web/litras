@@ -1,0 +1,1187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trip Fuel Calculator</title>
+<script>
+// Set the theme before the page paints: saved choice (fc.theme) first, then the system setting.
+(function () {
+  var t = null;
+  try { t = JSON.parse(localStorage.getItem("fc.theme")); } catch (e) { /* storage unavailable */ }
+  if (t !== "light" && t !== "dark") t = window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  document.documentElement.setAttribute("data-theme", t);
+})();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+/* Layout: inputs on the left (trip, car, fuel price, consumption), results and map in a sticky column on the right.
+   Under 900px it becomes one column in the order trip → results → map → car → price → consumption,
+   with a small cost bar pinned to the bottom until the results scroll into view. */
+:root {
+  --bg: #f5f6f7;
+  --surface: #ffffff;
+  --ink: #15181c;
+  --muted: #59616b;
+  --line: #dde1e5;
+  --line-strong: #b9c0c8;
+  --accent: #1c4fa1;
+  --accent-ink: #ffffff;
+  --accent-soft: #e9eef8;
+  --danger: #b42318;
+  --ok: #17733f;
+  --shadow: 0 8px 24px rgba(21, 24, 28, .12);
+  --font: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1215; --surface: #161a1f; --ink: #e7eaee; --muted: #9ba4ae; --line: #272d34; --line-strong: #444c56;
+    --accent: #8db3f5; --accent-ink: #0c1a30; --accent-soft: #1a2536; --danger: #ff8f85; --ok: #6fd39a;
+    --shadow: 0 8px 24px rgba(0, 0, 0, .5);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1215; --surface: #161a1f; --ink: #e7eaee; --muted: #9ba4ae; --line: #272d34; --line-strong: #444c56;
+  --accent: #8db3f5; --accent-ink: #0c1a30; --accent-soft: #1a2536; --danger: #ff8f85; --ok: #6fd39a;
+  --shadow: 0 8px 24px rgba(0, 0, 0, .5);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--ink);
+  font: 400 15px/1.5 var(--font);
+  font-feature-settings: "tnum" 1;
+  -webkit-font-smoothing: antialiased;
+  padding: 0 max(16px, env(safe-area-inset-right, 0px)) 56px max(16px, env(safe-area-inset-left, 0px));
+}
+.wrap { max-width: 1200px; margin: 0 auto; }
+
+header {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 28px 0 24px; border-bottom: 1px solid var(--line); margin-bottom: 8px;
+}
+h1 { font-size: 20px; font-weight: 600; letter-spacing: -.01em; line-height: 1.2; margin: 0; }
+.sub { display: block; color: var(--muted); font-size: 14px; margin-top: 2px; }
+
+.theme {
+  display: inline-flex; align-items: center; gap: 8px; flex: none;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  border-radius: 999px; padding: 6px 12px 6px 8px; font-size: 13px; font-weight: 500;
+}
+.theme svg { width: 18px; height: 18px; }
+.theme .moon, :root[data-theme="dark"] .theme .sun { display: none; }
+:root[data-theme="dark"] .theme .moon { display: block; }
+
+/* Grid */
+.app { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); column-gap: 56px; align-items: start; }
+.app > .sec { grid-column: 1; }
+.app > .side { grid-column: 2; grid-row: 1 / span 4; position: sticky; top: 16px; padding-top: 24px; display: flex; flex-direction: column; gap: 16px; }
+@media (max-width: 900px) {
+  .app { grid-template-columns: minmax(0, 1fr); }
+  .app > .side { grid-column: 1; grid-row: auto; position: static; padding-top: 8px; }
+}
+
+.sec { padding: 28px 0; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.sec:first-child { border-top: 0; }
+h2 { font-size: 17px; font-weight: 600; letter-spacing: -.005em; line-height: 1.3; margin: 0; }
+.sec-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+
+/* Form controls */
+label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 500; color: var(--muted); min-width: 0; }
+input, select, button, textarea { font: inherit; color: var(--ink); }
+input[type=text], input[type=number], input[type=password], select {
+  height: 42px; padding: 0 12px; width: 100%; min-width: 0;
+  background: var(--surface); border: 1px solid var(--line-strong); border-radius: 8px;
+  font-size: 15px; font-weight: 400; color: var(--ink);
+}
+input[readonly] { background: transparent; border-style: dashed; color: var(--muted); }
+input::placeholder { color: var(--muted); opacity: .8; }
+select { appearance: none; -webkit-appearance: none; padding-right: 34px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 17px) 18px, calc(100% - 12px) 18px; background-size: 5px 5px; background-repeat: no-repeat; }
+select:disabled { opacity: .6; }
+input:hover, select:hover { border-color: var(--muted); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+input:focus-visible, select:focus-visible { outline-offset: 1px; border-color: var(--accent); }
+
+.row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.row2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 420px) { .row { grid-template-columns: repeat(2, minmax(0, 1fr)); } .row > :last-child:nth-child(odd) { grid-column: 1 / -1; } }
+
+button { cursor: pointer; border-radius: 8px; padding: 0 16px; height: 42px; border: 1px solid var(--line-strong); background: var(--surface); font-size: 14px; font-weight: 500; }
+button:hover { border-color: var(--muted); }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button.primary:hover { filter: brightness(1.08); }
+button.quiet { border-color: transparent; background: transparent; color: var(--accent); padding: 0 4px; height: auto; }
+button.quiet:hover { text-decoration: underline; text-underline-offset: 3px; }
+button:disabled { opacity: .55; cursor: progress; }
+button.quiet:disabled { cursor: not-allowed; text-decoration: none; }
+
+/* Segmented controls (radio groups "cycle" and "basis") */
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); padding: 3px; gap: 3px; border: 1px solid var(--line-strong); border-radius: 10px; }
+.seg2 { grid-template-columns: repeat(2, 1fr); }
+.seg label { display: block; color: var(--ink); font-size: 14px; position: relative; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg span { display: block; text-align: center; padding: 8px 4px; border-radius: 7px; cursor: pointer; color: var(--muted); }
+.seg span:hover { color: var(--ink); }
+.seg input:checked + span { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.seg input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 0; }
+.field-label { font-size: 13px; font-weight: 500; color: var(--muted); margin-bottom: -8px; }
+
+.check { flex-direction: row; align-items: center; gap: 10px; color: var(--ink); font-size: 14px; font-weight: 400; }
+.check input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
+.hint { font-size: 13px; color: var(--muted); line-height: 1.45; }
+.msg { font-size: 14px; min-height: 20px; color: var(--muted); }
+.msg.err { color: var(--danger); }
+.msg.ok { color: var(--ok); }
+.actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+
+.pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; padding: 3px 10px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--muted); white-space: nowrap; }
+.pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .7; }
+.pill.live { color: var(--ok); border-color: currentColor; }
+
+details { border-top: 1px solid var(--line); padding-top: 12px; }
+details summary { cursor: pointer; color: var(--ink); font-size: 14px; font-weight: 500; list-style: none; display: flex; align-items: center; gap: 8px; width: fit-content; border-radius: 4px; }
+details summary::-webkit-details-marker { display: none; }
+details summary::before { content: ""; width: 6px; height: 6px; border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted); transform: rotate(-45deg); margin-right: 2px; }
+details[open] summary::before { transform: rotate(45deg) translate(-1px, -1px); }
+details[open] summary { margin-bottom: 14px; }
+.stack { display: flex; flex-direction: column; gap: 12px; }
+
+/* Trip: stops and legs */
+.route { display: flex; flex-direction: column; gap: 12px; }
+.stoprow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }
+.stoprow .x { width: 42px; padding: 0; font-size: 20px; line-height: 1; color: var(--muted); }
+.stoprow .x:hover { color: var(--danger); border-color: var(--danger); }
+#stops:empty { display: none; }
+.legs { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+.legs[hidden] { display: none; }
+.legs li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 16px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.legs .nm { min-width: 0; overflow-wrap: anywhere; }
+.legs .nums { font-size: 13px; color: var(--muted); text-align: right; white-space: nowrap; }
+.legs .note { display: block; color: var(--muted); font-size: 13px; }
+@media (max-width: 480px) { .legs li { grid-template-columns: minmax(0, 1fr); } .legs .nums { text-align: left; white-space: normal; } }
+
+/* Commute: trips per week, save form, saved trips */
+.tripopts { display: flex; align-items: center; justify-content: space-between; gap: 12px 20px; flex-wrap: wrap; }
+.perweek { flex-direction: row; align-items: center; gap: 10px; color: var(--ink); font-size: 14px; font-weight: 400; }
+.perweek input { width: 84px; }
+.savebox { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: end; }
+.savebox[hidden] { display: none; }
+@media (max-width: 420px) { .savebox { grid-template-columns: 1fr 1fr; } .savebox label { grid-column: 1 / -1; } }
+.saved[hidden] { display: none; }
+.saved { display: flex; flex-direction: column; gap: 8px; }
+.trips { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+.trips li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px; align-items: center; border-bottom: 1px solid var(--line); }
+.trips .open { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 16px; width: 100%; height: auto; text-align: left; padding: 10px 8px; border: 0; border-radius: 6px; background: transparent; font-weight: 400; }
+.trips .open:hover { background: var(--accent-soft); }
+.trips .nm { font-weight: 500; min-width: 0; overflow-wrap: anywhere; }
+.trips .meta { grid-column: 1; font-size: 13px; color: var(--muted); }
+.trips .cost { grid-column: 2; grid-row: 1 / span 2; text-align: right; font-size: 13px; color: var(--muted); white-space: nowrap; }
+.trips .cost b { display: block; font-size: 15px; font-weight: 600; color: var(--ink); }
+.trips .x { width: 36px; height: 36px; padding: 0; border-color: transparent; background: transparent; font-size: 18px; color: var(--muted); }
+.trips .x:hover { color: var(--danger); border-color: var(--danger); }
+
+/* Results */
+.results { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 20px; }
+.hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px 24px; flex-wrap: wrap; }
+.hero .k { font-size: 13px; font-weight: 500; color: var(--muted); }
+.hero .v { font-weight: 300; letter-spacing: -.035em; line-height: 1; white-space: nowrap; }
+.hero .cost .v { font-size: clamp(48px, 9vw, 72px); color: var(--ink); }
+.hero .fuel .v { font-size: clamp(30px, 5vw, 40px); color: var(--muted); }
+.hero .fuel { text-align: right; }
+.hero .u { font-size: .36em; font-weight: 500; letter-spacing: 0; margin-left: 6px; color: var(--muted); }
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--line); }
+.stats > div { padding: 14px 12px 0; border-left: 1px solid var(--line); min-width: 0; }
+.stats > div:first-child { border-left: 0; padding-left: 0; }
+.stats .k { font-size: 12px; color: var(--muted); }
+.stats .v { font-size: 17px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.week { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid var(--line); }
+.week[hidden] { display: none; }
+.week > div { padding: 14px 12px 0; border-left: 1px solid var(--line); min-width: 0; }
+.week > div:first-child { border-left: 0; padding-left: 0; }
+.week .k { font-size: 12px; color: var(--muted); }
+.week .v { font-size: 22px; font-weight: 500; letter-spacing: -.01em; white-space: nowrap; }
+.gauge { position: relative; height: 8px; border-radius: 4px; background: var(--accent-soft); overflow: hidden; }
+.gauge i { display: block; height: 100%; background: var(--accent); width: 0; border-radius: 4px; }
+.gauge-l { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin-top: 8px; }
+@media (max-width: 420px) {
+  .results { padding: 20px 16px; }
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stats > div:nth-child(3) { grid-column: 1 / -1; border-left: 0; padding-left: 0; border-top: 1px solid var(--line); margin-top: 14px; }
+  .hero .fuel { text-align: left; }
+}
+
+/* Station list */
+.stlist { list-style: none; margin: 0; padding: 0; }
+.stlist li + li { border-top: 1px solid var(--line); }
+.stlist button { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; width: 100%; height: auto; text-align: left; padding: 10px 8px; font-weight: 400; border: 0; border-radius: 6px; background: transparent; }
+.stlist button:hover { background: var(--accent-soft); }
+.stlist .p { font-size: 15px; font-weight: 600; color: var(--accent); }
+.stlist small { display: block; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.price-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: end; }
+#price { font-size: 20px; font-weight: 500; height: 48px; }
+.price-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; padding-bottom: 4px; }
+
+/* Map */
+.mapbox { position: relative; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--surface); height: clamp(360px, calc(100vh - 380px), 620px); }
+#map { position: absolute; inset: 0; background: var(--bg); }
+.field { position: relative; }
+.sugg { list-style: none; margin: 4px 0 0; padding: 4px; position: absolute; top: 100%; left: 0; right: 0; z-index: 1200; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 10px; max-height: 260px; overflow-y: auto; box-shadow: var(--shadow); }
+.sugg[hidden] { display: none; }
+.sugg button { display: block; width: 100%; height: auto; text-align: left; border: 0; border-radius: 6px; background: transparent; padding: 9px 10px; font-weight: 400; }
+.sugg button:hover, .sugg button:focus-visible { background: var(--accent-soft); outline-offset: -2px; }
+.pin { display: flex; align-items: center; justify-content: center; background: var(--accent); color: var(--accent-ink); border: 2px solid var(--surface); border-radius: 50%; font: 600 12px/1 var(--font); box-shadow: 0 1px 5px rgba(0,0,0,.45); }
+.leaflet-container { font: inherit; background: var(--bg); }
+.leaflet-container .leaflet-control-attribution { background: color-mix(in srgb, var(--surface) 88%, transparent); color: var(--muted); font-size: 11px; }
+.leaflet-container .leaflet-control-attribution a { color: var(--accent); }
+.leaflet-bar a, .leaflet-bar a:hover { background: var(--surface); color: var(--ink); border-bottom-color: var(--line); }
+.leaflet-bar { border: 1px solid var(--line-strong) !important; box-shadow: none !important; }
+.mapnote { position: absolute; left: 12px; right: 12px; bottom: 32px; z-index: 1000; background: var(--surface); color: var(--ink); border: 1px solid var(--line-strong); border-radius: 8px; padding: 10px 12px; font-size: 13px; }
+.mapnote[hidden] { display: none; }
+@media (max-width: 900px) { .mapbox { height: 340px; } }
+
+/* Phone cost bar, shown until the results card is on screen */
+.minibar { display: none; }
+@media (max-width: 900px) {
+  .minibar {
+    position: fixed; left: 12px; right: 12px; bottom: max(12px, env(safe-area-inset-bottom, 0px)); z-index: 1500;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    background: var(--ink); color: var(--bg); border-radius: 12px; padding: 10px 10px 10px 16px; box-shadow: var(--shadow);
+  }
+  .minibar[hidden] { display: none; }
+  .minibar b { font-size: 20px; font-weight: 500; letter-spacing: -.02em; }
+  .minibar span { font-size: 13px; opacity: .75; margin-left: 8px; }
+  .minibar a { color: var(--ink); background: var(--bg); text-decoration: none; font-size: 14px; font-weight: 500; padding: 8px 12px; border-radius: 8px; white-space: nowrap; }
+  body { padding-bottom: 96px; }
+}
+
+.foot { color: var(--muted); font-size: 12px; padding-top: 24px; border-top: 1px solid var(--line); margin-top: 8px; }
+@media (prefers-reduced-motion: no-preference) {
+  .gauge i { transition: width .35s ease; }
+  html { scroll-behavior: smooth; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Trip fuel calculator</h1>
+      <span class="sub">Fuel use and cost of a car trip in Lithuania</span>
+    </div>
+    <button class="theme" id="themeBtn" type="button" role="switch" aria-checked="false" aria-label="Dark mode">
+      <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
+      <span id="themeText">Light</span>
+    </button>
+  </header>
+
+  <main class="app">
+
+    <section class="sec" aria-labelledby="h-trip">
+      <h2 id="h-trip">Trip</h2>
+      <div class="saved" id="savedWrap" hidden>
+        <div class="field-label" id="savedLabel">Saved trips</div>
+        <ul class="trips" id="tripList" aria-labelledby="savedLabel"></ul>
+      </div>
+      <div class="route">
+        <div class="field">
+          <label for="origin">From <input id="origin" type="text" value="Vilnius, Lithuania" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="originList"></label>
+          <ul class="sugg" id="originList" role="listbox" hidden></ul>
+        </div>
+        <div id="stops" class="route"></div>
+        <div class="field">
+          <label for="dest">To <input id="dest" type="text" value="Kaunas, Lithuania" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="destList"></label>
+          <ul class="sugg" id="destList" role="listbox" hidden></ul>
+        </div>
+        <div><button id="addStop" class="quiet" type="button">+ Add a stop</button></div>
+      </div>
+      <div class="actions">
+        <button id="routeBtn" class="primary" type="button">Calculate route</button>
+        <span class="msg" id="routeMsg" role="status"></span>
+      </div>
+      <div class="row2">
+        <label for="distance">Distance (km) <input id="distance" type="number" step="0.1" min="0" value="100"></label>
+        <label for="duration">Drive time <input id="duration" type="text" value="" placeholder="From route" readonly></label>
+      </div>
+      <div class="hint" id="distHint">Example distance. Calculate a route to fill this in, or type your own.</div>
+      <ol class="legs" id="legs" aria-label="Route legs" hidden></ol>
+      <div class="field-label" id="cycleLabel">Driving type</div>
+      <div class="seg" role="radiogroup" aria-labelledby="cycleLabel">
+        <label><input type="radio" name="cycle" value="city"><span>City</span></label>
+        <label><input type="radio" name="cycle" value="mixed" checked><span>Mixed</span></label>
+        <label><input type="radio" name="cycle" value="highway"><span>Highway</span></label>
+      </div>
+      <div class="tripopts">
+        <label class="check" for="roundTrip"><input id="roundTrip" type="checkbox"> Round trip</label>
+        <label class="perweek" for="perWeek">Trips per week <input id="perWeek" type="number" step="1" min="0" max="50" placeholder="e.g. 5"></label>
+      </div>
+      <div class="actions"><button id="saveTripBtn" class="quiet" type="button" aria-expanded="false" aria-controls="saveTrip">Save this trip</button></div>
+      <form id="saveTrip" class="savebox" hidden>
+        <label for="tripName">Name <input id="tripName" type="text" maxlength="60" required></label>
+        <button class="primary" type="submit">Save</button>
+        <button id="saveTripCancel" type="button">Cancel</button>
+      </form>
+      <details>
+        <summary>Routing options</summary>
+        <div class="stack">
+          <label for="orsKey">OpenRouteService key (optional)
+            <input id="orsKey" type="password" autocomplete="off" placeholder="Empty = free OSRM demo server">
+          </label>
+          <div class="hint">Routes use the public OSRM server by default. A free key from openrouteservice.org is used instead when entered, and is stored only in this browser.</div>
+        </div>
+      </details>
+    </section>
+
+    <aside class="side" aria-label="Results and map">
+      <section class="results" id="results" aria-labelledby="h-res">
+        <h2 id="h-res">This trip</h2>
+        <div class="hero">
+          <div class="cost"><div class="k">Cost</div><div class="v"><span id="rCost">0.00</span><span class="u">EUR</span></div></div>
+          <div class="fuel"><div class="k">Fuel</div><div class="v"><span id="rLitres">0.0</span><span class="u">L</span></div></div>
+        </div>
+        <div class="stats">
+          <div><div class="k">Distance</div><div class="v" id="rKm">0 km</div></div>
+          <div><div class="k">Consumption</div><div class="v" id="rCons">0 l/100</div></div>
+          <div><div class="k">Per 100 km</div><div class="v" id="rPer100">0.00 EUR</div></div>
+        </div>
+        <div class="week" id="weekBox" hidden>
+          <div><div class="k" id="rWeekK">Per week</div><div class="v" id="rWeek">0.00 EUR</div></div>
+          <div><div class="k">Per month</div><div class="v" id="rMonth">0.00 EUR</div></div>
+        </div>
+        <div>
+          <div class="gauge" aria-hidden="true"><i id="gaugeFill"></i></div>
+          <div class="gauge-l"><span id="gaugeText">Share of tank</span><span id="rRange">Range 0 km</span></div>
+        </div>
+      </section>
+
+      <div class="mapbox">
+        <div id="map" role="region" aria-label="Route map"></div>
+        <div class="mapnote" id="mapNote" role="status" hidden></div>
+      </div>
+    </aside>
+
+    <section class="sec" aria-labelledby="h-car">
+      <h2 id="h-car">Car</h2>
+      <label for="carSelect">Vehicle
+        <select id="carSelect"></select>
+      </label>
+      <div class="hint" id="carSpec"></div>
+      <div class="row">
+        <label for="consCity">City, l/100 km <input id="consCity" type="number" step="0.1" min="1" max="40"></label>
+        <label for="consMixed">Mixed, l/100 km <input id="consMixed" type="number" step="0.1" min="1" max="40"></label>
+        <label for="consHwy">Highway, l/100 km <input id="consHwy" type="number" step="0.1" min="1" max="40"></label>
+      </div>
+      <div class="hint">Starting values are estimates. Replace them with your own measured numbers (see "Measure consumption" below).</div>
+      <details>
+        <summary>Add another car</summary>
+        <form id="addCar" class="stack">
+          <label for="newName">Name <input id="newName" type="text" placeholder="e.g. Skoda Octavia 2.0 TDI 110 kW" required></label>
+          <div class="row2">
+            <label for="newFuel">Fuel
+              <select id="newFuel"><option value="petrol95">Petrol 95</option><option value="diesel">Diesel</option><option value="lpg">LPG</option></select>
+            </label>
+            <label for="newTank">Tank (l) <input id="newTank" type="number" value="50" min="10" max="150" required></label>
+          </div>
+          <div class="row">
+            <label for="newCity">City <input id="newCity" type="number" step="0.1" value="9" min="1" required></label>
+            <label for="newMixed">Mixed <input id="newMixed" type="number" step="0.1" value="7" min="1" required></label>
+            <label for="newHwy">Highway <input id="newHwy" type="number" step="0.1" value="6" min="1" required></label>
+          </div>
+          <div><button type="submit">Add car</button></div>
+        </form>
+      </details>
+    </section>
+
+    <section class="sec" aria-labelledby="h-price">
+      <div class="sec-head">
+        <h2 id="h-price">Fuel price</h2>
+        <span class="pill" id="priceState">bundled</span>
+      </div>
+      <div class="row2">
+        <label for="priceNetwork">Station network <select id="priceNetwork"></select></label>
+        <label for="priceMuni">Municipality <select id="priceMuni"></select></label>
+      </div>
+      <div class="seg seg2" role="radiogroup" aria-label="Price basis">
+        <label><input type="radio" name="basis" value="avg" checked><span>Average price</span></label>
+        <label><input type="radio" name="basis" value="min"><span>Cheapest station</span></label>
+      </div>
+      <div class="price-row">
+        <label for="price"><span id="priceLabel">Petrol 95 (EUR/l)</span> <input id="price" type="number" step="0.001" min="0"></label>
+        <div class="price-meta"><button id="priceRefresh" class="quiet" type="button">Reload prices</button></div>
+      </div>
+      <div class="hint" id="priceNote"></div>
+      <details>
+        <summary id="stationsSummary">Cheapest stations</summary>
+        <ul class="stlist" id="stationList"></ul>
+      </details>
+    </section>
+
+    <section class="sec" aria-labelledby="h-meas">
+      <h2 id="h-meas">Measure consumption</h2>
+      <div class="row">
+        <label for="mKm">Km since last fill <input id="mKm" type="number" step="0.1" min="0" placeholder="620"></label>
+        <label for="mL">Litres added <input id="mL" type="number" step="0.01" min="0" placeholder="44.8"></label>
+        <label for="mP">Price paid (EUR/l) <input id="mP" type="number" step="0.001" min="0" placeholder="1.925"></label>
+      </div>
+      <div class="actions">
+        <button id="mBtn" type="button">Calculate</button>
+        <span class="msg" id="mOut"></span>
+      </div>
+      <div class="actions">
+        <button id="mUse" type="button" hidden>Use as mixed value for this car</button>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="foot">Map data &copy; OpenStreetMap contributors, tiles &copy; CARTO. Fuel prices: Lithuanian Energy Agency (LEA) and the companies operating the stations. Address search by Photon, routes by OSRM or OpenRouteService.</footer>
+</div>
+
+<div class="minibar" id="minibar" aria-hidden="true">
+  <div><b id="miniCost">0.00 EUR</b><span id="miniLitres">0.0 L</span></div>
+  <a href="#results" tabindex="-1">Results and map</a>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="config.js"></script>   <!-- optional, local only: window.FC_CONFIG = { cartoKey } -->
+<script src="prices.js"></script>
+<script>
+/* ---------- Configuration ---------- */
+
+// Fuel prices come from prices.js, which update_prices.py builds from the Lithuanian Energy Agency (LEA)
+// station price file. Without prices.js the page falls back to this bundled EU bulletin average.
+const PRICE_SEED = { date: "2026-10-12", source: "EU Weekly Oil Bulletin", petrol95: 1.925, diesel: 2.205, lpg: null };
+const FIELD = { petrol95: "p", diesel: "d", lpg: "l" };   // price field names inside prices.js
+
+// CARTO basemaps key (free for personal use, up to 5M tile requests a month), passed as ?key= on tile URLs.
+// It lives in config.js next to this page, which is kept out of the GitHub repository. Without it the map
+// uses CARTO's public basemap tiles, which need no key.
+const CARTO_KEY = (window.FC_CONFIG && window.FC_CONFIG.cartoKey) || "";
+
+const FUELS = { petrol95: "Petrol 95", diesel: "Diesel", lpg: "LPG" };
+
+const DEFAULT_CARS = [
+  { id: "seat-leon-2017-18tsi", name: "SEAT Leon 1.8 TSI 132 kW", year: 2017, fuel: "petrol95", tank: 50,
+    cons: { city: 9.2, mixed: 7.0, highway: 6.0 } }
+];
+
+/* ---------- Helpers ---------- */
+
+const $ = (id) => document.getElementById(id);
+const fmt = (n, d) => Number.isFinite(n) ? n.toLocaleString("en-GB", { minimumFractionDigits: d, maximumFractionDigits: d }) : "–";
+const store = {
+  get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* storage unavailable */ } }
+};
+const today = () => new Date().toLocaleDateString("sv-SE");
+
+/* ---------- State ---------- */
+
+let cars = store.get("fc.cars") || DEFAULT_CARS.map((c) => JSON.parse(JSON.stringify(c)));
+let carId = store.get("fc.carId") || cars[0].id;
+let lea = null;   // window.FUEL_PRICES, when prices.js is present
+let priceDirty = false;
+let lastMeasured = null;
+
+const car = () => cars.find((c) => c.id === carId) || cars[0];
+const cycle = () => document.querySelector('input[name="cycle"]:checked').value;
+
+/* ---------- Car UI ---------- */
+
+function renderCars() {
+  const sel = $("carSelect");
+  sel.innerHTML = "";
+  cars.forEach((c) => sel.appendChild(new Option((c.year ? c.year + " " : "") + c.name, c.id, false, c.id === carId)));
+  syncCarFields();
+}
+
+function syncCarFields() {
+  const c = car();
+  $("consCity").value = c.cons.city;
+  $("consMixed").value = c.cons.mixed;
+  $("consHwy").value = c.cons.highway;
+  $("carSpec").textContent = FUELS[c.fuel] + " · " + c.tank + " l tank";
+  $("priceLabel").textContent = FUELS[c.fuel] + " (EUR/l)";
+  priceDirty = false;
+  applyPriceToInput();
+  calc();
+}
+
+function readConsFields() {
+  const c = car();
+  c.cons.city = parseFloat($("consCity").value) || c.cons.city;
+  c.cons.mixed = parseFloat($("consMixed").value) || c.cons.mixed;
+  c.cons.highway = parseFloat($("consHwy").value) || c.cons.highway;
+  store.set("fc.cars", cars);
+  calc();
+}
+
+/* ---------- Calculation ---------- */
+
+function calc() {
+  const c = car();
+  const key = cycle() === "highway" ? "highway" : cycle();
+  const cons = c.cons[key];
+  const oneWay = Math.max(0, parseFloat($("distance").value) || 0);
+  const km = oneWay * ($("roundTrip").checked ? 2 : 1);
+  const price = parseFloat($("price").value) || 0;
+  const litres = km * cons / 100;
+  const cost = litres * price;
+  const range = cons > 0 ? c.tank / cons * 100 : 0;
+
+  $("rLitres").textContent = fmt(litres, 1);
+  $("rCost").textContent = fmt(cost, 2);
+  $("rKm").textContent = fmt(km, 1) + " km";
+  $("rCons").textContent = fmt(cons, 1) + " l/100";
+  $("rPer100").textContent = fmt(cons * price, 2) + " EUR";
+  $("rRange").textContent = "Range " + fmt(range, 0) + " km";
+  const share = c.tank > 0 ? litres / c.tank * 100 : 0;
+  $("gaugeFill").style.width = Math.min(100, share) + "%";
+  $("gaugeText").textContent = share > 100
+    ? "Needs " + fmt(Math.ceil(share / 100), 0) + " tanks, plan a stop"
+    : fmt(share, 0) + "% of a " + c.tank + " l tank";
+  renderLegs();
+  $("miniCost").textContent = fmt(cost, 2) + " EUR";
+  $("miniLitres").textContent = fmt(litres, 1) + " L";
+  const perWeek = Math.max(0, parseInt($("perWeek").value, 10) || 0);
+  $("weekBox").hidden = !(perWeek > 0);
+  $("rWeekK").textContent = "Per week (" + perWeek + "×)";
+  $("rWeek").textContent = fmt(cost * perWeek, 2) + " EUR";
+  $("rMonth").textContent = fmt(cost * perWeek * 52 / 12, 2) + " EUR";
+  renderTrips();
+}
+
+/* ---------- Prices ---------- */
+
+const PRICE_SOURCE_LINE = "Source: Lithuanian Energy Agency (LEA) and the companies operating the stations. Prices are collected on working days at about 10:00.";
+
+const daysOld = (iso) => Math.round((new Date(today()) - new Date(iso)) / 864e5);
+const fmtDate = (iso) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+
+function loadLea() {
+  lea = window.FUEL_PRICES && Array.isArray(window.FUEL_PRICES.stations) ? window.FUEL_PRICES : null;
+  const net = $("priceNetwork"), muni = $("priceMuni");
+  net.innerHTML = ""; muni.innerHTML = "";
+  net.appendChild(new Option("All networks", ""));
+  muni.appendChild(new Option("All municipalities", ""));
+  if (lea) {
+    const counts = {};
+    lea.stations.forEach((s) => { counts[s.c] = (counts[s.c] || 0) + 1; });
+    Object.keys(counts).sort((a, b) => counts[b] - counts[a] || a.localeCompare(b))
+      .forEach((n) => net.appendChild(new Option(n + " (" + counts[n] + ")", n)));
+    Array.from(new Set(lea.stations.map((s) => s.m).filter(Boolean))).sort((a, b) => a.localeCompare(b, "lt"))
+      .forEach((m) => muni.appendChild(new Option(m, m)));
+    net.value = store.get("fc.priceNet") || "";
+    muni.value = store.get("fc.priceMuni") || "";
+    if (net.selectedIndex < 0) net.value = "";
+    if (muni.selectedIndex < 0) muni.value = "";
+  }
+  net.disabled = muni.disabled = !lea;
+}
+
+function renderStations(rows, field) {
+  const list = $("stationList");
+  list.innerHTML = "";
+  rows.slice().sort((a, b) => a[field] - b[field] || a.c.localeCompare(b.c)).slice(0, 8).forEach((s) => {
+    const li = document.createElement("li");
+    const b = document.createElement("button");
+    b.type = "button";
+    const p = document.createElement("span"); p.className = "p"; p.textContent = fmt(s[field], 3);
+    const t = document.createElement("span"); t.textContent = s.c;
+    const small = document.createElement("small"); small.textContent = s.a + (s.m ? " · " + s.m : "");
+    t.appendChild(small);
+    b.append(p, t);
+    b.addEventListener("click", () => {
+      $("price").value = s[field]; priceDirty = true; calc();
+      $("priceNote").textContent = "Using the price at " + s.c + ", " + s.a + ". Change a filter to go back to an average.";
+    });
+    li.appendChild(b); list.appendChild(li);
+  });
+}
+
+function applyPriceToInput() {
+  const c = car();
+  const note = $("priceNote"), state = $("priceState");
+  let value = null;
+  $("stationList").innerHTML = "";
+  $("stationsSummary").textContent = "Cheapest stations";
+
+  if (lea) {
+    const field = FIELD[c.fuel], net = $("priceNetwork").value, muni = $("priceMuni").value;
+    const rows = lea.stations.filter((s) => s[field] != null && (!net || s.c === net) && (!muni || s.m === muni));
+    const age = daysOld(lea.date);
+    state.textContent = "LEA " + fmtDate(lea.date);
+    state.classList.toggle("live", age <= 3);
+    if (rows.length) {
+      const vals = rows.map((s) => s[field]);
+      const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+      const min = Math.min.apply(null, vals), max = Math.max.apply(null, vals);
+      value = document.querySelector('input[name="basis"]:checked').value === "min" ? min : avg;
+      note.textContent = rows.length + " stations match. Average " + fmt(avg, 3) + ", cheapest " + fmt(min, 3) +
+        ", highest " + fmt(max, 3) + " EUR/l. " +
+        (age > 3 ? "This data is " + age + " days old, run update_prices.py to refresh it. " : "") + PRICE_SOURCE_LINE;
+      renderStations(rows, field);
+      $("stationsSummary").textContent = "Cheapest stations (" + Math.min(8, rows.length) + " of " + rows.length + ")";
+    } else {
+      note.textContent = "No station reports a " + FUELS[c.fuel] + " price for these filters. " + PRICE_SOURCE_LINE;
+    }
+  } else {
+    value = PRICE_SEED[c.fuel];
+    state.textContent = "bundled";
+    state.classList.remove("live");
+    note.textContent = "prices.js was not found next to this page, so the EU bulletin average of 12 Oct 2026 is used" +
+      (value == null ? " (it has no LPG price, type one in)" : "") + ". Run update_prices.py to get daily station prices.";
+  }
+  if (!priceDirty) $("price").value = value != null ? Math.round(value * 1000) / 1000 : "";
+  calc();
+}
+
+function reloadPricesFile() {
+  return new Promise((resolve) => {
+    const s = document.createElement("script");
+    s.src = "prices.js?t=" + Date.now();
+    s.onload = () => resolve(true);
+    s.onerror = () => resolve(false);
+    document.head.appendChild(s);
+  });
+}
+
+/* ---------- Map, address search and routing (open source stack) ---------- */
+
+// Map: Leaflet + OpenStreetMap tiles. Address search: Photon (OSM data). Routing: OSRM demo server,
+// or OpenRouteService when you enter a free key. All are fair-use public services.
+
+const places = {
+  origin: { lat: 54.6872, lng: 25.2803, label: "Vilnius, Lithuania" },
+  dest: { lat: 54.8985, lng: 23.9036, label: "Kaunas, Lithuania" }
+};
+let map = null, routeLine = null, pinLayer = null;
+
+function showMapNote(text) { const n = $("mapNote"); n.textContent = text; n.hidden = !text; }
+
+function initMap() {
+  if (!window.L) { showMapNote("The map library did not load. Check your connection and reload."); return; }
+  map = L.map("map").setView([55.17, 23.9], 7);
+  pinLayer = L.layerGroup().addTo(map);
+  applyMapTheme();
+  drawPins(true);
+}
+
+// Tiles follow the page theme: CARTO light_all / dark_all. OpenStreetMap's own tile server needs a Referer.
+// A page opened from a file has none, and gets an "Access blocked" picture back instead of tiles, so those
+// pages always use CARTO (same OSM data). On http(s) pages the light theme tries OpenStreetMap first and
+// falls back to CARTO on error; OpenStreetMap has no dark style, so the dark theme uses CARTO dark_all.
+const MAP_CREDIT = "&copy; OpenStreetMap contributors";
+let tileLayer = null, osmFailed = false;
+const cartoUrl = (style) => CARTO_KEY
+  ? "https://basemaps.cartocdn.com/rastertiles/" + style + "/{z}/{x}/{y}.png?key=" + encodeURIComponent(CARTO_KEY)
+  : "https://basemaps.cartocdn.com/" + style + "/{z}/{x}/{y}.png";
+const isDark = () => document.documentElement.getAttribute("data-theme") === "dark";
+const accentColor = () => getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#1c4fa1";
+
+function applyMapTheme() {
+  if (!map) return;
+  if (tileLayer) map.removeLayer(tileLayer);
+  const web = location.protocol === "http:" || location.protocol === "https:";
+  if (web && !isDark() && !osmFailed) {
+    const osm = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19, referrerPolicy: "origin", attribution: MAP_CREDIT
+    });
+    osm.on("tileerror", () => {
+      if (osmFailed || tileLayer !== osm) return;
+      osmFailed = true;
+      applyMapTheme();
+    });
+    tileLayer = osm;
+  } else {
+    tileLayer = L.tileLayer(cartoUrl(isDark() ? "dark_all" : "light_all"), {
+      maxZoom: 19, attribution: MAP_CREDIT + " &copy; CARTO"
+    });
+  }
+  tileLayer.addTo(map);
+  tileLayer.bringToBack();
+  if (routeLine) routeLine.setStyle({ color: accentColor() });
+}
+
+const stops = [];            // extra stops between From and To: { id, place, input, row, labelText }
+const MAX_STOPS = 8;
+let stopSeq = 0;
+let lastRoute = null;        // { legs: [{ meters, seconds }], names: [...] } from the last calculated route
+
+const pinLetter = (i) => String.fromCharCode(65 + i);
+const shortName = (label) => (label || "").split(",")[0].trim() || "?";
+
+function fmtDuration(seconds) {
+  const mins = Math.round(seconds / 60);
+  return mins < 60 ? mins + " min" : Math.floor(mins / 60) + " h " + String(mins % 60).padStart(2, "0") + " min";
+}
+
+function pinIcon(text) { return L.divIcon({ className: "pin", html: text, iconSize: [26, 26], iconAnchor: [13, 13] }); }
+
+function drawPins(fit) {
+  if (!map) return;
+  pinLayer.clearLayers();
+  const pts = [places.origin].concat(stops.map((s) => s.place), [places.dest]).filter(Boolean);
+  pts.forEach((p, i) => L.marker([p.lat, p.lng], { icon: pinIcon(pinLetter(i)), keyboard: false }).addTo(pinLayer));
+  if (fit && pts.length > 1) map.fitBounds(pts.map((p) => [p.lat, p.lng]), { padding: [40, 40] });
+  else if (fit && pts.length === 1) map.setView([pts[0].lat, pts[0].lng], 11);
+}
+
+function placesChanged() {
+  drawPins(true);
+  if (lastRoute) $("distHint").textContent = "Places changed. Calculate the route again to update the distance.";
+}
+
+async function photon(q, limit) {
+  const url = "https://photon.komoot.io/api/?q=" + encodeURIComponent(q) + "&limit=" + limit + "&lang=en&lat=55.17&lon=23.9";
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Address search failed (HTTP " + res.status + ").");
+  const data = await res.json();
+  return (data.features || []).map((f) => ({
+    lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0], label: photonLabel(f.properties || {})
+  }));
+}
+
+function photonLabel(p) {
+  const street = [p.street, p.housenumber].filter(Boolean).join(" ");
+  const parts = [p.name && p.name !== p.street ? p.name : null, street, p.city || p.town || p.village || p.county, p.country].filter(Boolean);
+  return Array.from(new Set(parts)).join(", ");
+}
+
+// Address suggestions for one input. The chosen place is stored in holder[prop].
+function wireSuggest(input, list, holder, prop, onPick) {
+  let timer = null, seq = 0, closeTimer = null;
+  const close = () => { list.hidden = true; list.innerHTML = ""; input.setAttribute("aria-expanded", "false"); };
+  input.addEventListener("input", () => {
+    holder[prop] = null;
+    clearTimeout(timer);
+    const q = input.value.trim();
+    if (q.length < 3) { seq++; close(); return; }
+    timer = setTimeout(async () => {
+      const mine = ++seq;
+      try {
+        const results = await photon(q, 5);
+        if (mine !== seq) return;
+        if (document.activeElement !== input) { close(); return; }   // the user already moved on
+        list.innerHTML = "";
+        if (!results.length) { close(); return; }
+        results.forEach((p) => {
+          const li = document.createElement("li");
+          li.setAttribute("role", "option");
+          const b = document.createElement("button");
+          b.type = "button"; b.textContent = p.label;
+          b.addEventListener("mousedown", (e) => e.preventDefault());
+          b.addEventListener("click", () => {
+            holder[prop] = p; input.value = p.label; close(); onPick();
+          });
+          li.appendChild(b); list.appendChild(li);
+        });
+        list.hidden = false; input.setAttribute("aria-expanded", "true");
+      } catch (e) { close(); }
+    }, 350);
+  });
+  input.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
+  input.addEventListener("blur", () => { clearTimeout(closeTimer); closeTimer = setTimeout(close, 200); });
+}
+
+async function resolvePlace(holder, prop, input) {
+  if (holder[prop]) return holder[prop];
+  const q = input.value.trim();
+  if (!q) throw new Error("Enter both From and To.");
+  const r = await photon(q, 1);
+  if (!r.length) throw new Error('Could not find "' + q + '".');
+  holder[prop] = r[0];
+  input.value = r[0].label;
+  return r[0];
+}
+
+/* ----- Stops ----- */
+
+function renumberStops() {
+  stops.forEach((s, i) => { s.labelText.textContent = "Stop " + (i + 1) + " "; });
+  $("addStop").disabled = stops.length >= MAX_STOPS;
+}
+
+function addStop(focus) {
+  if (stops.length >= MAX_STOPS) return;
+  const id = "stop" + (++stopSeq);
+  const stop = { id, place: null };
+
+  const row = document.createElement("div"); row.className = "stoprow";
+  const field = document.createElement("div"); field.className = "field";
+  const label = document.createElement("label"); label.setAttribute("for", id + "In");
+  const labelText = document.createElement("span");
+  const input = document.createElement("input");
+  input.id = id + "In"; input.type = "text"; input.autocomplete = "off"; input.placeholder = "Town, address or place";
+  input.setAttribute("role", "combobox"); input.setAttribute("aria-autocomplete", "list");
+  input.setAttribute("aria-expanded", "false"); input.setAttribute("aria-controls", id + "List");
+  label.append(labelText, input);
+  const list = document.createElement("ul"); list.className = "sugg"; list.id = id + "List";
+  list.setAttribute("role", "listbox"); list.hidden = true;
+  field.append(label, list);
+  const rm = document.createElement("button");
+  rm.type = "button"; rm.className = "x"; rm.textContent = "×"; rm.setAttribute("aria-label", "Remove this stop");
+  row.append(field, rm);
+
+  stop.row = row; stop.input = input; stop.labelText = labelText;
+  stops.push(stop);
+  $("stops").appendChild(row);
+
+  wireSuggest(input, list, stop, "place", placesChanged);
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") calculateRoute(); });
+  rm.addEventListener("click", () => {
+    stops.splice(stops.indexOf(stop), 1);
+    row.remove();
+    renumberStops();
+    placesChanged();
+  });
+  renumberStops();
+  if (focus !== false) input.focus();
+  return stop;
+}
+
+/* ----- Routing ----- */
+
+async function fetchRoute(points) {
+  const orsKey = store.get("fc.orsKey");
+  if (orsKey) {
+    const res = await fetch("https://api.openrouteservice.org/v2/directions/driving-car/geojson", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": orsKey },
+      body: JSON.stringify({ coordinates: points.map((p) => [p.lng, p.lat]) })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = data.error;
+      throw new Error((err && (err.message || (typeof err === "string" ? err : ""))) || ("OpenRouteService error (HTTP " + res.status + ")."));
+    }
+    const f = data.features && data.features[0];
+    if (!f) throw new Error("No driving route found.");
+    return {
+      meters: f.properties.summary.distance, seconds: f.properties.summary.duration, coords: f.geometry.coordinates,
+      legs: (f.properties.segments || []).map((s) => ({ meters: s.distance, seconds: s.duration }))
+    };
+  }
+  const url = "https://router.project-osrm.org/route/v1/driving/" + points.map((p) => p.lng + "," + p.lat).join(";") +
+    "?overview=full&geometries=geojson";
+  const res = await fetch(url);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data.code !== "Ok" || !data.routes || !data.routes.length) {
+    throw new Error(data.message || (res.ok ? "No driving route found." : "Routing server error (HTTP " + res.status + ")."));
+  }
+  const r = data.routes[0];
+  return {
+    meters: r.distance, seconds: r.duration, coords: r.geometry.coordinates,
+    legs: (r.legs || []).map((l) => ({ meters: l.distance, seconds: l.duration }))
+  };
+}
+
+function renderLegs() {
+  const ol = $("legs");
+  ol.innerHTML = "";
+  if (!lastRoute || lastRoute.legs.length < 2) { ol.hidden = true; return; }
+  const cons = car().cons[cycle()];
+  const price = parseFloat($("price").value) || 0;
+  lastRoute.legs.forEach((leg, i) => {
+    const km = leg.meters / 1000, litres = km * cons / 100;
+    const li = document.createElement("li");
+    const nm = document.createElement("span"); nm.className = "nm";
+    nm.textContent = pinLetter(i) + " " + lastRoute.names[i] + " → " + pinLetter(i + 1) + " " + lastRoute.names[i + 1];
+    const nums = document.createElement("span"); nums.className = "nums";
+    nums.textContent = fmt(km, 1) + " km · " + fmtDuration(leg.seconds) + " · " + fmt(litres, 1) + " L · " + fmt(litres * price, 2) + " EUR";
+    li.append(nm, nums);
+    ol.appendChild(li);
+  });
+  if ($("roundTrip").checked) {
+    const li = document.createElement("li");
+    const note = document.createElement("span"); note.className = "note";
+    note.textContent = "Round trip: the totals above count these legs twice.";
+    li.appendChild(note);
+    ol.appendChild(li);
+  }
+  ol.hidden = false;
+}
+
+async function calculateRoute() {
+  const msg = $("routeMsg");
+  if (!map) { msg.className = "msg err"; msg.textContent = "The map did not load, so the route cannot be drawn. You can still type a distance."; return; }
+  $("routeBtn").disabled = true; msg.className = "msg"; msg.textContent = "Calculating...";
+  try {
+    const a = await resolvePlace(places, "origin", $("origin"));
+    const via = [];
+    for (const s of stops) {
+      if (!s.place && !s.input.value.trim()) continue;       // ignore empty stops
+      via.push(await resolvePlace(s, "place", s.input));
+    }
+    const b = await resolvePlace(places, "dest", $("dest"));
+    const points = [a].concat(via, [b]);
+    const r = await fetchRoute(points);
+
+    const km = r.meters / 1000;
+    $("distance").value = km.toFixed(1);
+    $("duration").value = fmtDuration(r.seconds);
+    $("distHint").textContent = via.length
+      ? "Distance from the routing server, through " + via.length + (via.length === 1 ? " stop" : " stops") + ". Drive time does not include time spent at stops. You can still edit the distance."
+      : "Distance from the routing server. You can still edit it.";
+    lastRoute = r.legs.length === points.length - 1 ? { legs: r.legs, names: points.map((p) => shortName(p.label)) } : null;
+
+    const latlngs = r.coords.map((c) => [c[1], c[0]]);
+    if (routeLine) routeLine.remove();
+    routeLine = L.polyline(latlngs, { color: accentColor(), weight: 5, opacity: 0.9 }).addTo(map);
+    drawPins(false);
+    map.fitBounds(routeLine.getBounds(), { padding: [40, 40] });
+
+    msg.className = "msg ok"; msg.textContent = fmt(km, 1) + " km, " + fmtDuration(r.seconds);
+    calc();
+  } catch (e) {
+    msg.className = "msg err";
+    msg.textContent = e instanceof TypeError ? "Could not reach the address or routing service. Check your connection." : e.message;
+  } finally {
+    $("routeBtn").disabled = false;
+  }
+}
+
+/* ---------- Measure consumption ---------- */
+
+function measure() {
+  const km = parseFloat($("mKm").value), l = parseFloat($("mL").value), p = parseFloat($("mP").value);
+  const out = $("mOut");
+  if (!(km > 0) || !(l > 0)) { out.className = "msg err"; out.textContent = "Enter km driven and litres added."; $("mUse").hidden = true; return; }
+  lastMeasured = l / km * 100;
+  out.className = "msg num";
+  out.textContent = fmt(lastMeasured, 2) + " l/100 km" + (p > 0 ? " · " + fmt(p * l / km, 3) + " EUR/km" : "");
+  $("mUse").hidden = false;
+}
+
+/* ---------- Events ---------- */
+
+$("carSelect").addEventListener("change", (e) => { carId = e.target.value; store.set("fc.carId", carId); syncCarFields(); });
+["consCity", "consMixed", "consHwy"].forEach((id) => $(id).addEventListener("change", readConsFields));
+["distance", "price"].forEach((id) => $(id).addEventListener("input", () => { if (id === "price") priceDirty = true; calc(); }));
+$("distance").addEventListener("input", () => { $("distHint").textContent = "Manual distance."; lastRoute = null; renderLegs(); });
+$("addStop").addEventListener("click", addStop);
+$("roundTrip").addEventListener("change", calc);
+document.querySelectorAll('input[name="cycle"]').forEach((r) => r.addEventListener("change", calc));
+$("routeBtn").addEventListener("click", calculateRoute);
+["origin", "dest"].forEach((id) => $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") calculateRoute(); }));
+["priceNetwork", "priceMuni"].forEach((id) => $(id).addEventListener("change", (e) => {
+  store.set(id === "priceNetwork" ? "fc.priceNet" : "fc.priceMuni", e.target.value);
+  priceDirty = false; applyPriceToInput();
+}));
+document.querySelectorAll('input[name="basis"]').forEach((r) => r.addEventListener("change", () => {
+  store.set("fc.basis", r.value); priceDirty = false; applyPriceToInput();
+}));
+$("priceRefresh").addEventListener("click", async () => {
+  const btn = $("priceRefresh");
+  btn.disabled = true;
+  const ok = await reloadPricesFile();
+  loadLea(); priceDirty = false; applyPriceToInput();
+  btn.disabled = false;
+  if (!ok) $("priceNote").textContent = "Could not read prices.js next to this page. " + $("priceNote").textContent;
+});
+$("mBtn").addEventListener("click", measure);
+$("mUse").addEventListener("click", () => {
+  if (lastMeasured == null) return;
+  car().cons.mixed = Math.round(lastMeasured * 10) / 10;
+  store.set("fc.cars", cars);
+  $("consMixed").value = car().cons.mixed;
+  calc();
+  $("mOut").textContent += " · saved as mixed value";
+});
+
+$("addCar").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const name = $("newName").value.trim();
+  if (!name) return;
+  const c = {
+    id: "car-" + Date.now(), name, year: null, fuel: $("newFuel").value,
+    tank: parseFloat($("newTank").value) || 50,
+    cons: { city: parseFloat($("newCity").value), mixed: parseFloat($("newMixed").value), highway: parseFloat($("newHwy").value) }
+  };
+  cars.push(c); carId = c.id;
+  store.set("fc.cars", cars); store.set("fc.carId", carId);
+  e.target.reset(); e.target.closest("details").open = false;
+  renderCars();
+});
+
+/* ---------- Saved trips (commute) ---------- */
+
+// Saved in fc.trips: { id, name, origin, dest, stops: [place], km (one way), duration, legs, round, cycle, perWeek }.
+// A place is { lat, lng, label }, or just { label } when it was typed but never looked up.
+// Costs are not saved: each row is priced with the current car and fuel price.
+let trips = Array.isArray(store.get("fc.trips")) ? store.get("fc.trips") : [];
+
+const typedPlace = (holder, prop, input) => holder[prop] || (input.value.trim() ? { label: input.value.trim() } : null);
+const hasCoords = (p) => p && Number.isFinite(p.lat) && Number.isFinite(p.lng);
+
+function tripCost(t) {
+  const cons = car().cons[t.cycle] || car().cons.mixed;
+  const price = parseFloat($("price").value) || 0;
+  const trip = t.km * (t.round ? 2 : 1) * cons / 100 * price;
+  return { trip, week: trip * t.perWeek, month: trip * t.perWeek * 52 / 12 };
+}
+
+function renderTrips() {
+  const ul = $("tripList");
+  ul.innerHTML = "";
+  $("savedWrap").hidden = !trips.length;
+  trips.forEach((t) => {
+    const c = tripCost(t);
+    const li = document.createElement("li");
+    const open = document.createElement("button");
+    open.type = "button"; open.className = "open";
+    const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = t.name;
+    const meta = document.createElement("span"); meta.className = "meta";
+    meta.textContent = fmt(t.km, 1) + " km" + (t.round ? ", round trip" : "") + (t.perWeek ? ", " + t.perWeek + "× a week" : "");
+    const cost = document.createElement("span"); cost.className = "cost";
+    const b = document.createElement("b");
+    if (t.perWeek) { b.textContent = fmt(c.week, 2) + " EUR a week"; cost.append(b, fmt(c.month, 2) + " a month"); }
+    else { b.textContent = fmt(c.trip, 2) + " EUR"; cost.append(b, "per trip"); }
+    open.append(nm, cost, meta);
+    open.addEventListener("click", () => loadTrip(t));
+    const rm = document.createElement("button");
+    rm.type = "button"; rm.className = "x"; rm.textContent = "×"; rm.setAttribute("aria-label", "Remove " + t.name);
+    rm.addEventListener("click", () => {
+      trips = trips.filter((x) => x.id !== t.id);
+      store.set("fc.trips", trips);
+      renderTrips();
+    });
+    li.append(open, rm);
+    ul.appendChild(li);
+  });
+}
+
+function defaultTripName() {
+  const names = [$("origin").value, $("dest").value].map(shortName);
+  return names[0] + " → " + names[1];
+}
+
+function openSaveForm(show) {
+  $("saveTrip").hidden = !show;
+  $("saveTripBtn").setAttribute("aria-expanded", String(show));
+  if (show) { $("tripName").value = defaultTripName(); $("tripName").focus(); $("tripName").select(); }
+}
+
+function saveTrip(name) {
+  const t = {
+    id: "trip-" + Date.now(), name,
+    origin: typedPlace(places, "origin", $("origin")),
+    dest: typedPlace(places, "dest", $("dest")),
+    stops: stops.map((s) => typedPlace(s, "place", s.input)).filter(Boolean),
+    km: Math.max(0, parseFloat($("distance").value) || 0),
+    duration: $("duration").value,
+    legs: lastRoute,
+    round: $("roundTrip").checked,
+    cycle: cycle(),
+    perWeek: Math.max(0, parseInt($("perWeek").value, 10) || 0)
+  };
+  trips.push(t);
+  store.set("fc.trips", trips);
+  renderTrips();
+}
+
+function loadTrip(t) {
+  stops.slice().forEach((s) => s.row.remove());
+  stops.length = 0;
+  t.stops.forEach((p) => { const s = addStop(false); s.input.value = p.label; s.place = hasCoords(p) ? p : null; });
+  renumberStops();
+  $("origin").value = t.origin ? t.origin.label : "";
+  $("dest").value = t.dest ? t.dest.label : "";
+  places.origin = hasCoords(t.origin) ? t.origin : null;
+  places.dest = hasCoords(t.dest) ? t.dest : null;
+  $("distance").value = t.km;
+  $("duration").value = t.duration || "";
+  $("roundTrip").checked = !!t.round;
+  const r = document.querySelector('input[name="cycle"][value="' + t.cycle + '"]');
+  if (r) r.checked = true;
+  $("perWeek").value = t.perWeek || "";
+  lastRoute = t.legs || null;
+  if (routeLine) { routeLine.remove(); routeLine = null; }
+  $("distHint").textContent = "Saved distance for " + t.name + ". Updating the route...";
+  drawPins(true);
+  calc();
+  // Redraws the line. If routing fails, the saved distance stays and routeMsg says why.
+  // When it works, the saved trip takes the fresh distance, time and looked-up places.
+  calculateRoute().then(() => {
+    if (!routeLine) { $("distHint").textContent = "Saved distance for " + t.name + ". The route could not be updated."; return; }
+    Object.assign(t, {
+      origin: places.origin, dest: places.dest, stops: stops.map((s) => typedPlace(s, "place", s.input)).filter(Boolean),
+      km: Math.max(0, parseFloat($("distance").value) || 0), duration: $("duration").value, legs: lastRoute
+    });
+    store.set("fc.trips", trips);
+    renderTrips();
+  });
+}
+
+$("perWeek").addEventListener("input", calc);
+$("saveTripBtn").addEventListener("click", () => openSaveForm($("saveTrip").hidden));
+$("saveTripCancel").addEventListener("click", () => { openSaveForm(false); $("saveTripBtn").focus(); });
+$("saveTrip").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const name = $("tripName").value.trim();
+  if (!name) return;
+  saveTrip(name);
+  openSaveForm(false);
+  $("saveTripBtn").focus();
+});
+
+/* ---------- Theme ---------- */
+
+function syncThemeButton() {
+  const dark = isDark();
+  $("themeBtn").setAttribute("aria-checked", String(dark));
+  $("themeText").textContent = dark ? "Dark" : "Light";
+}
+$("themeBtn").addEventListener("click", () => {
+  const next = isDark() ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", next);
+  store.set("fc.theme", next);
+  syncThemeButton();
+  applyMapTheme();
+});
+// Until a choice is saved, follow the system setting when it changes.
+if (window.matchMedia) {
+  const mq = matchMedia("(prefers-color-scheme: dark)");
+  const follow = (e) => {
+    if (store.get("fc.theme")) return;
+    document.documentElement.setAttribute("data-theme", e.matches ? "dark" : "light");
+    syncThemeButton(); applyMapTheme();
+  };
+  if (mq.addEventListener) mq.addEventListener("change", follow); else if (mq.addListener) mq.addListener(follow);
+}
+
+// Phone cost bar: hidden while the results card is on screen.
+function syncMinibar() {
+  const r = $("results").getBoundingClientRect();
+  $("minibar").hidden = r.top < innerHeight - 140 && r.bottom > 0;   // the bar itself covers the bottom 140px
+}
+addEventListener("scroll", syncMinibar, { passive: true });
+addEventListener("resize", syncMinibar);
+syncMinibar();
+
+/* ---------- Start ---------- */
+
+syncThemeButton();
+
+const savedBasis = store.get("fc.basis");
+if (savedBasis) { const r = document.querySelector('input[name="basis"][value="' + savedBasis + '"]'); if (r) r.checked = true; }
+loadLea();
+renderCars();
+initMap();
+wireSuggest($("origin"), $("originList"), places, "origin", placesChanged);
+wireSuggest($("dest"), $("destList"), places, "dest", placesChanged);
+const savedOrs = store.get("fc.orsKey");
+if (savedOrs) $("orsKey").value = savedOrs;
+$("orsKey").addEventListener("change", (e) => store.set("fc.orsKey", e.target.value.trim() || null));
+</script>
+</body>
+</html>

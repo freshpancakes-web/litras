@@ -1,0 +1,39 @@
+# Refreshes prices.js from the Lithuanian Energy Agency (LEA) file on weekdays and commits it when the
+# price date changes. Times are UTC: 08:30 and 13:00 are 10:30 and 15:00 in Vilnius in winter
+# (11:30 and 16:00 in summer). LEA collects prices at about 10:00 on working days.
+name: Update fuel prices
+
+on:
+  schedule:
+    - cron: "30 8 * * 1-5"
+    - cron: "0 13 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build prices.js
+        run: |
+          before=$(grep -o '"date":"[0-9-]*"' prices.js | head -1)
+          python3 update_prices.py
+          after=$(grep -o '"date":"[0-9-]*"' prices.js | head -1)
+          echo "before=$before after=$after"
+          if [ "$before" = "$after" ]; then
+            echo "No new price date yet, nothing to commit."
+            git checkout -- prices.js
+          fi
+
+      - name: Commit new prices
+        run: |
+          if git diff --quiet -- prices.js; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add prices.js
+          git commit -m "Update fuel prices to $(grep -o '"date":"[0-9-]*"' prices.js | head -1 | cut -d'"' -f4)"
+          git push
