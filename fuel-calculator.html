@@ -160,6 +160,8 @@ details[open] summary { margin-bottom: 14px; }
 
 /* Trip: stops and legs */
 .route { display: flex; flex-direction: column; gap: 12px; }
+button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size: 13px; }
+#locMsg[hidden] { display: none; }
 .stoprow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }
 .stoprow .x { width: 42px; padding: 0; font-size: 20px; line-height: 1; color: var(--muted); }
 .stoprow .x:hover { color: var(--danger); border-color: var(--danger); }
@@ -313,12 +315,14 @@ details[open] summary { margin-bottom: 14px; }
       </div>
       <div class="route">
         <div class="field">
-          <label for="origin">From <input id="origin" type="text" value="Vilnius, Lithuania" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="originList"></label>
+          <button id="useLocation" class="quiet loc-btn" type="button">Use my location</button>
+          <label for="origin">From <input id="origin" type="text" placeholder="Town, address or place" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="originList"></label>
           <ul class="sugg" id="originList" role="listbox" hidden></ul>
         </div>
+        <div class="hint" id="locMsg" role="status" hidden></div>
         <div id="stops" class="route"></div>
         <div class="field">
-          <label for="dest">To <input id="dest" type="text" value="Kaunas, Lithuania" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="destList"></label>
+          <label for="dest">To <input id="dest" type="text" placeholder="Town, address or place" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="destList"></label>
           <ul class="sugg" id="destList" role="listbox" hidden></ul>
         </div>
         <div><button id="addStop" class="quiet" type="button">+ Add a stop</button></div>
@@ -845,8 +849,8 @@ function reloadPricesFile() {
 // or OpenRouteService when you enter a free key. All are fair-use public services.
 
 const places = {
-  origin: { lat: 54.6872, lng: 25.2803, label: "Vilnius, Lithuania" },
-  dest: { lat: 54.8985, lng: 23.9036, label: "Kaunas, Lithuania" }
+  origin: null,
+  dest: null
 };
 let map = null, routeLine = null, pinLayer = null;
 
@@ -1011,6 +1015,56 @@ function wireSuggest(input, list, holder, prop, onPick) {
     else if (e.key === "Enter" && activeIdx >= 0) { e.preventDefault(); options()[activeIdx].click(); }
   });
   input.addEventListener("blur", () => { clearTimeout(closeTimer); closeTimer = setTimeout(close, 200); });
+}
+
+/* ----- Current location ----- */
+
+const LOCATION_LABEL = "My location";
+
+// Street and town only: the nearest point Photon knows is often a business, which isn't where you are.
+function locationLabel(p) {
+  const street = [p.street, p.housenumber].filter(Boolean).join(" ");
+  const parts = [street, p.city || p.town || p.village || p.county, p.country].filter(Boolean);
+  return Array.from(new Set(parts)).join(", ") || p.name || LOCATION_LABEL;
+}
+
+async function reverseLookup(lat, lng) {
+  const res = await fetch("https://photon.komoot.io/reverse?lat=" + lat + "&lon=" + lng + "&lang=en", { signal: AbortSignal.timeout(5000) });
+  if (!res.ok) throw new Error("Address lookup failed (HTTP " + res.status + ").");
+  const data = await res.json();
+  return locationLabel(((data.features || [])[0] || {}).properties || {});
+}
+
+function locationMessage(text) { const m = $("locMsg"); m.textContent = text; m.hidden = !text; }
+
+// asked = the Use my location button. On opening the app (asked = false) a refusal stays quiet.
+function useMyLocation(asked) {
+  const input = $("origin"), btn = $("useLocation"), startValue = input.value;
+  const stillWanted = () => input.value === startValue;
+  if (!navigator.geolocation) {
+    if (asked) locationMessage("This browser can't share your location. Type your address instead.");
+    return;
+  }
+  locationMessage("");
+  btn.disabled = asked;
+  navigator.geolocation.getCurrentPosition(async (pos) => {
+    if (!stillWanted()) { btn.disabled = false; return; }
+    store.set("fc.locationDenied", null);
+    const lat = pos.coords.latitude, lng = pos.coords.longitude;
+    let label = LOCATION_LABEL;
+    try { label = await reverseLookup(lat, lng); } catch (e) { /* the coordinates are enough to route */ }
+    btn.disabled = false;
+    if (!stillWanted()) return;
+    places.origin = { lat, lng, label };
+    input.value = label;
+    placesChanged();
+  }, (err) => {
+    btn.disabled = false;
+    if (err.code === 1) store.set("fc.locationDenied", true);
+    if (asked) locationMessage(err.code === 1
+      ? "Location is blocked. Allow it for this site in your browser's settings, then try again."
+      : "Could not find your location. Type your address instead.");
+  }, { timeout: 10000, maximumAge: 60000 });
 }
 
 async function resolvePlace(holder, prop, input) {
@@ -1282,6 +1336,7 @@ function renderTrips() {
 }
 
 function defaultTripName() {
+  if (!$("origin").value.trim() || !$("dest").value.trim()) return "";
   const names = [$("origin").value, $("dest").value].map(shortName);
   return names[0] + " → " + names[1];
 }
@@ -1405,6 +1460,8 @@ initMap();
 syncOfflineNote();
 wireSuggest($("origin"), $("originList"), places, "origin", placesChanged);
 wireSuggest($("dest"), $("destList"), places, "dest", placesChanged);
+$("useLocation").addEventListener("click", () => useMyLocation(true));
+if (!store.get("fc.locationDenied")) useMyLocation(false);
 const savedOrs = store.get("fc.orsKey");
 if (savedOrs) $("orsKey").value = savedOrs;
 $("orsKey").addEventListener("change", (e) => store.set("fc.orsKey", e.target.value.trim() || null));

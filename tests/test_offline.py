@@ -192,6 +192,8 @@ class OfflineTest(unittest.TestCase):
 
     def test_offline_saved_trip_opens(self):
         p = self.load()
+        p.fill("#origin", "Vilnius")
+        p.fill("#dest", "Kaunas")
         p.click("#saveTripBtn")
         p.fill("#tripName", "Home")
         p.click("#saveTrip button[type=submit]")

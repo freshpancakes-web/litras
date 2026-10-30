@@ -57,6 +57,25 @@ def osrm_legs(legs):
     }]}
 
 
+# A controllable navigator.geolocation. Modes: allow, denied, unavailable, hold (never answers until
+# window.__geo.answer() is called), none (the browser has no geolocation at all).
+GEO_STUB = """
+(() => {
+  const g = window.__geo = { mode: "__MODE__", calls: 0, ok: null,
+    answer() { g.ok({ coords: { latitude: 54.7, longitude: 25.3, accuracy: 10 } }); } };
+  Object.defineProperty(navigator, "geolocation", { configurable: true, value: g.mode === "none" ? undefined : {
+    getCurrentPosition(ok, err) {
+      g.calls++; g.ok = ok;
+      if (g.mode === "allow") setTimeout(g.answer, 0);
+      if (g.mode === "denied") setTimeout(() => err({ code: 1, message: "denied" }), 0);
+      if (g.mode === "unavailable") setTimeout(() => err({ code: 2, message: "unavailable" }), 0);
+    } } });
+})();
+"""
+REVERSE_REPLY = {"features": [{"geometry": {"coordinates": [25.3, 54.7]}, "properties": {
+    "name": "Cyclocity", "street": "Gediminas Avenue", "city": "Vilnius", "country": "Lithuania"}}]}
+
+
 class AppTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -78,7 +97,8 @@ class AppTest(unittest.TestCase):
     def setUp(self):
         self.contexts = []
         self.tile_urls = []
-        self.routes = {"photon": photon_default, "osrm": osrm_default(), "ors": None}
+        self.routes = {"photon": photon_default, "osrm": osrm_default(), "ors": None, "reverse": REVERSE_REPLY}
+        self.reverse_requests = []
         self.addCleanup(self.close_contexts)
 
     def close_contexts(self):
@@ -87,7 +107,7 @@ class AppTest(unittest.TestCase):
 
     # ----- helpers -----
 
-    def open(self, theme="light", width=1280, height=900, key=None, prices="fixture", history=()):
+    def open(self, theme="light", width=1280, height=900, key=None, prices="fixture", history=(), geo="hold"):
         """Open the app in a fresh browser context with the outside services mocked."""
         self.tile_urls = []
         self.history = list(history)
@@ -96,6 +116,7 @@ class AppTest(unittest.TestCase):
         )
         self.contexts.append(ctx)
         self.context = ctx
+        ctx.add_init_script(GEO_STUB.replace("__MODE__", geo))
         ctx.route(re.compile(r"/config\.js(\?.*)?$"), lambda r: self._config(r, key))
         ctx.route(re.compile(r"/prices\.js(\?.*)?$"), lambda r: self._prices(r, prices))
         ctx.route(re.compile(r"^https://photon\.komoot\.io/"), self._photon)
@@ -132,6 +153,14 @@ class AppTest(unittest.TestCase):
         route.fulfill(status=status, content_type="application/json", headers=CORS, body=json.dumps(data))
 
     def _photon(self, route):
+        if "/reverse" in route.request.url:
+            self.reverse_requests.append(route.request.url)
+            reply = self.routes["reverse"]
+            if reply is None:
+                route.abort()
+            else:
+                self._json(route, reply)
+            return
         q = urllib.parse.parse_qs(urllib.parse.urlparse(route.request.url).query).get("q", [""])[0]
         handler = self.routes["photon"]
         self._json(route, handler(q) if callable(handler) else handler)
@@ -195,6 +224,8 @@ class AppTest(unittest.TestCase):
     def test_stop_shows_legs_and_cycle_changes_them(self):
         page = self.open()
         self.routes["osrm"] = osrm_legs([(60000, 3000), (40000, 2400)])
+        page.fill("#origin", "Vilnius")
+        page.fill("#dest", "Kaunas")
         page.click("#addStop")
         page.fill("#stop1In", "Kedainiai")
         page.click("#routeBtn")
@@ -211,6 +242,8 @@ class AppTest(unittest.TestCase):
 
     def test_saved_trip_survives_reload(self):
         page = self.open()
+        page.fill("#origin", "Vilnius")
+        page.fill("#dest", "Kaunas")
         page.check("#roundTrip")
         page.fill("#perWeek", "5")
         page.click("#saveTripBtn")
@@ -227,6 +260,130 @@ class AppTest(unittest.TestCase):
         row.click()
         self.assertEqual(self.value("perWeek"), "5")
         self.assertTrue(page.is_checked("#roundTrip"))
+
+    # ----- empty start and current location -----
+
+    def wait_location(self, page, expected):
+        page.wait_for_function("(v) => document.getElementById('origin').value === v", arg=expected)
+
+    def test_starts_empty_with_no_pins(self):
+        page = self.open()
+        self.assertEqual(self.value("origin"), "")
+        self.assertEqual(self.value("dest"), "")
+        self.assertEqual(page.locator(".pin").count(), 0)
+        self.assertTrue(page.locator("#locMsg").is_hidden())
+        self.assertEqual(self.text("rCost"), "13.71")
+
+    def test_calculate_with_empty_fields_asks_for_them(self):
+        page = self.open()
+        page.click("#routeBtn")
+        page.wait_for_function("document.getElementById('routeMsg').textContent !== 'Calculating...'")
+        self.assertEqual(self.text("routeMsg"), "Enter both From and To.")
+
+    def test_asks_for_location_on_opening(self):
+        page = self.open()
+        self.assertEqual(page.evaluate("window.__geo.calls"), 1)
+
+    def test_location_fills_from_without_business_names(self):
+        page = self.open(geo="allow")
+        self.wait_location(page, "Gediminas Avenue, Vilnius, Lithuania")
+        self.assertEqual(self.value("dest"), "")
+        self.assertEqual(page.locator(".pin").count(), 1)
+        self.assertIn("lat=54.7", self.reverse_requests[0])
+        self.assertIn("lon=25.3", self.reverse_requests[0])
+
+    def test_real_browser_geolocation_api(self):
+        page = self.open(geo="hold")
+        self.context.grant_permissions(["geolocation"])
+        self.context.set_geolocation({"latitude": 54.7, "longitude": 25.3})
+        page.evaluate("delete navigator.geolocation")   # back to the browser's own API
+        page.click("#useLocation")
+        self.wait_location(page, "Gediminas Avenue, Vilnius, Lithuania")
+
+    def test_route_uses_the_exact_coordinates(self):
+        page = self.open(geo="allow")
+        self.wait_location(page, "Gediminas Avenue, Vilnius, Lithuania")
+        page.fill("#dest", "Kaunas, Lithuania")
+        with page.expect_request(lambda r: "router.project-osrm.org" in r.url) as req:
+            page.click("#routeBtn")
+        self.assertIn("/25.3,54.7;", req.value.url)
+
+    def test_failed_street_lookup_says_my_location(self):
+        self.routes["reverse"] = None
+        page = self.open(geo="allow")
+        self.wait_location(page, "My location")
+        self.assertEqual(page.locator(".pin").count(), 1)
+
+    def test_no_address_in_reply_says_my_location(self):
+        self.routes["reverse"] = {"features": []}
+        page = self.open(geo="allow")
+        self.wait_location(page, "My location")
+
+    def test_denied_stays_quiet_and_is_not_asked_again(self):
+        page = self.open(geo="denied")
+        page.wait_for_function("localStorage.getItem('fc.locationDenied') === 'true'")
+        self.assertEqual(self.value("origin"), "")
+        self.assertTrue(page.locator("#locMsg").is_hidden())
+        page.reload()
+        page.wait_for_selector(".leaflet-container")
+        self.assertEqual(page.evaluate("window.__geo.calls"), 0)
+
+    def test_button_after_denied_explains_then_works_when_allowed(self):
+        page = self.open(geo="denied")
+        page.wait_for_function("localStorage.getItem('fc.locationDenied') === 'true'")
+        page.click("#useLocation")
+        page.wait_for_selector("#locMsg:not([hidden])")
+        self.assertIn("browser's settings", self.text("locMsg"))
+        self.assertFalse(page.is_disabled("#useLocation"))
+        page.evaluate("window.__geo.mode = 'allow'")
+        page.click("#useLocation")
+        self.wait_location(page, "Gediminas Avenue, Vilnius, Lithuania")
+        self.assertTrue(page.locator("#locMsg").is_hidden())
+        self.assertIsNone(page.evaluate("JSON.parse(localStorage.getItem('fc.locationDenied'))"))
+
+    def test_unavailable_location_is_explained_only_on_the_button(self):
+        page = self.open(geo="unavailable")
+        page.wait_for_function("window.__geo.calls === 1")
+        page.wait_for_timeout(100)
+        self.assertTrue(page.locator("#locMsg").is_hidden())
+        self.assertIsNone(page.evaluate("localStorage.getItem('fc.locationDenied')"))
+        page.click("#useLocation")
+        page.wait_for_selector("#locMsg:not([hidden])")
+        self.assertIn("Type your address", self.text("locMsg"))
+
+    def test_browser_without_location_explains_on_the_button(self):
+        page = self.open(geo="none")
+        self.assertTrue(page.locator("#locMsg").is_hidden())
+        page.click("#useLocation")
+        self.assertIn("Type your address", self.text("locMsg"))
+
+    def test_late_location_does_not_overwrite_typing(self):
+        page = self.open(geo="hold")
+        page.fill("#origin", "Kaun")
+        page.evaluate("window.__geo.answer()")
+        page.wait_for_timeout(300)
+        self.assertEqual(self.value("origin"), "Kaun")
+        self.assertEqual(self.reverse_requests, [])
+        self.assertEqual(page.locator(".pin").count(), 0)
+
+    def test_button_replaces_what_is_there(self):
+        page = self.open(geo="hold")
+        page.fill("#origin", "Kaunas")
+        page.evaluate("window.__geo.mode = 'allow'")
+        page.click("#useLocation")
+        self.wait_location(page, "Gediminas Avenue, Vilnius, Lithuania")
+
+    def test_location_is_not_stored(self):
+        page = self.open(geo="allow")
+        self.wait_location(page, "Gediminas Avenue, Vilnius, Lithuania")
+        stored = page.evaluate("JSON.stringify(Object.assign({}, localStorage))")
+        self.assertNotIn("54.7", stored)
+        self.assertNotIn("Gediminas", stored)
+
+    def test_save_form_has_no_placeholder_name_when_empty(self):
+        page = self.open()
+        page.click("#saveTripBtn")
+        self.assertEqual(self.value("tripName"), "")
 
     # ----- price trend -----
 
@@ -531,6 +688,7 @@ class AppTest(unittest.TestCase):
         page = self.open()
         osrm = []
         page.on("request", lambda r: osrm.append(r.url) if "router.project-osrm.org" in r.url else None)
+        page.fill("#origin", "Vilnius, Lithuania")
         if field.startswith("stop"):
             page.click("#addStop")
         page.click("#" + field)
