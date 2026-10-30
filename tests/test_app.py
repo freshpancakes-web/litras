@@ -328,6 +328,14 @@ class AppTest(unittest.TestCase):
         page.wait_for_timeout(1000)
         self.assertTrue(osrm)
 
+    def test_typing_resets_highlight(self):
+        page, _ = self.open_suggestions("dest")
+        page.press("#dest", "ArrowDown")
+        page.type("#dest", "e")
+        self.assertIsNone(page.get_attribute("#dest", "aria-activedescendant"))
+        page.press("#dest", "Enter")
+        self.assertEqual(self.value("dest"), "Pane")
+
     def test_escape_closes_and_clears(self):
         page, _ = self.open_suggestions("dest")
         page.press("#dest", "ArrowDown")

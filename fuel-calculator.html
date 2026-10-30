@@ -778,6 +778,7 @@ function wireSuggest(input, list, holder, prop, onPick) {
   const close = () => { list.hidden = true; list.innerHTML = ""; activeIdx = -1; input.removeAttribute("aria-activedescendant"); input.setAttribute("aria-expanded", "false"); };
   input.addEventListener("input", () => {
     holder[prop] = null;
+    setActive(-1);
     clearTimeout(timer);
     const q = input.value.trim();
     if (q.length < 3) { seq++; close(); return; }
