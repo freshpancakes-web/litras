@@ -49,3 +49,8 @@ jobs:
           git commit -m "Update fuel prices to $(grep -o '"date":"[0-9-]*"' prices.js | head -1 | cut -d'"' -f4)"
           git pull --rebase origin main
           git push
+
+      # Fails the job, and so emails the owner, if the prices have stopped changing. That is what happens
+      # if LEA starts a new file in January and the old link still works.
+      - name: Check the prices are recent
+        run: python3 update_prices.py --check-fresh

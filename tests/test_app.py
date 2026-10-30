@@ -87,9 +87,10 @@ class AppTest(unittest.TestCase):
 
     # ----- helpers -----
 
-    def open(self, theme="light", width=1280, height=900, key=None, prices="fixture"):
+    def open(self, theme="light", width=1280, height=900, key=None, prices="fixture", history=()):
         """Open the app in a fresh browser context with the outside services mocked."""
         self.tile_urls = []
+        self.history = list(history)
         ctx = self.browser.new_context(
             viewport={"width": width, "height": height}, color_scheme=theme, locale="en-GB",
         )
@@ -121,6 +122,7 @@ class AppTest(unittest.TestCase):
         with open(FIXTURE, encoding="utf-8") as f:
             day = datetime.date.today() - datetime.timedelta(days=5 if mode == "old" else 0)
             body = f.read().replace("__TODAY__", day.isoformat())
+        body = body.replace('"history": []', '"history": ' + json.dumps(self.history))
         route.fulfill(content_type="text/javascript; charset=utf-8", body=body)
 
     def _json(self, route, data, status=200):
@@ -225,6 +227,73 @@ class AppTest(unittest.TestCase):
         row.click()
         self.assertEqual(self.value("perWeek"), "5")
         self.assertTrue(page.is_checked("#roundTrip"))
+
+    # ----- price trend -----
+
+    TREND = [
+        {"date": "2026-10-05", "petrol95": 1.931, "diesel": 2.200, "lpg": None},
+        {"date": "2026-10-06", "petrol95": 1.950, "diesel": 2.210, "lpg": 0.900},
+        {"date": "2026-10-07", "petrol95": 1.970, "diesel": 2.220, "lpg": None},
+        {"date": "2026-10-08", "petrol95": 1.960, "diesel": 2.230, "lpg": 0.900},
+        {"date": "2026-10-09", "petrol95": 1.940, "diesel": 2.240, "lpg": 0.900},
+        {"date": "2026-10-12", "petrol95": 1.920, "diesel": 2.250, "lpg": None},
+        {"date": "2026-10-13", "petrol95": 1.905, "diesel": 2.250, "lpg": 0.900},
+        {"date": "2026-10-14", "petrol95": 1.908, "diesel": 2.248, "lpg": 0.900},
+    ]
+
+    def add_car(self, page, name, fuel):
+        page.locator("summary", has_text="Add another car").click()
+        page.fill("#newName", name)
+        page.select_option("#newFuel", fuel)
+        page.click("#addCar button[type=submit]")
+
+    def test_trend_states_change_for_the_cars_fuel(self):
+        page = self.open(history=self.TREND)
+        self.assertTrue(page.locator("#priceTrend").is_visible())
+        # 1.908 against 1.931 at the start, and against 1.970 five working days back
+        self.assertEqual(self.text("trendText"),
+                         "National average 1.908 EUR/l. Down 2.3 ct since 5 Oct. Down 6.2 ct over the last 5 working days.")
+
+    def test_trend_follows_the_selected_car(self):
+        page = self.open(history=self.TREND)
+        self.add_car(page, "Test diesel", "diesel")
+        self.assertEqual(self.text("trendText"),
+                         "National average 2.248 EUR/l. Up 4.8 ct since 5 Oct. Up 2.8 ct over the last 5 working days.")
+
+    def test_trend_skips_gaps_in_the_data(self):
+        page = self.open(history=self.TREND)
+        self.add_car(page, "Test LPG", "lpg")
+        self.assertEqual(self.text("trendText"),
+                         "National average 0.900 EUR/l. Unchanged since 6 Oct.")
+        self.assertEqual(page.locator("#trendChart .trend-dot").count(), 1)
+
+    def test_trend_chart_draws_every_point_and_is_described(self):
+        page = self.open(history=self.TREND)
+        points = page.get_attribute("#trendChart .trend-line", "points").split()
+        self.assertEqual(len(points), len(self.TREND))
+        ys = [float(p.split(",")[1]) for p in points]
+        # Highest price (third point) is drawn highest; lowest (seventh) lowest. SVG y grows downwards.
+        self.assertEqual(ys.index(min(ys)), 2)
+        self.assertEqual(ys.index(max(ys)), 6)
+        self.assertEqual(page.get_attribute("#trendChart", "role"), "img")
+        self.assertIn("Down 2.3 ct", page.get_attribute("#trendChart", "aria-label"))
+        self.assertEqual(self.text("trendFrom"), "5 Oct")
+        self.assertEqual(self.text("trendTo"), "14 Oct")
+
+    def test_trend_hidden_without_enough_data(self):
+        cases = {"no history": dict(history=[]), "one point": dict(history=self.TREND[:1]),
+                 "no prices.js": dict(prices="none", history=self.TREND)}
+        for name, kw in cases.items():
+            with self.subTest(name):
+                page = self.open(**kw)
+                self.assertTrue(page.locator("#priceTrend").is_hidden())
+
+    def test_trend_fits_a_phone_in_both_themes(self):
+        for theme in ("light", "dark"):
+            with self.subTest(theme=theme):
+                page = self.open(theme=theme, width=360, history=self.TREND)
+                self.assertTrue(page.locator("#priceTrend").is_visible())
+                self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth"), 360)
 
     # ----- theme -----
 
