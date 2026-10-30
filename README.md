@@ -20,9 +20,15 @@ Everything you enter stays in your browser (`localStorage`).
 | `fuel-calculator.html` | The whole app. It also works when opened straight from the file. |
 | `prices.js` | Station prices, written by `update_prices.py`. Don't edit it by hand. |
 | `update_prices.py` | Downloads the LEA Excel file and writes `prices.js`. Python 3 standard library only. |
-| `schedule_prices.sh` | Optional: a macOS job that runs the updater on weekdays at 10:30 and 15:00. |
-| `.github/workflows/update-prices.yml` | Runs the updater on GitHub on weekdays and commits new prices. |
+| `schedule_prices.sh` | Optional: installs a macOS job that runs `update_from_github.sh` on weekdays at 10:45, 12:00 and 15:00. |
+| `update_from_github.sh` | Asks GitHub to refresh the prices, waits up to 3 minutes, then pulls them into this folder (only on `main`, fast-forward only; it discards nothing except local changes to `prices.js`). |
+| `.github/workflows/update-prices.yml` | Runs the updater on GitHub on weekdays and commits prices only when their date is later than the current file's. |
 | `config.js` | Optional and not in the repository: `window.FC_CONFIG = { cartoKey: "..." }` for a CARTO basemaps key. |
+
+## How prices stay fresh
+GitHub Actions builds `prices.js` and commits it; the hosted page serves that file. GitHub's own schedule runs four times a day on weekdays, but GitHub can start scheduled runs hours late. To be faster, the optional Mac job (`bash schedule_prices.sh`) triggers the same workflow at 10:45, 12:00 and 15:00 and pulls the result, so it needs the GitHub CLI (`gh`) signed in.
+
+The hosted page therefore gets the day's prices at about 10:45 only when the Mac is awake then. Otherwise it gets them when GitHub's schedule runs, which may be later.
 
 ## Data and credits
 Fuel prices: Lithuanian Energy Agency (LEA) and the companies that operate the stations, collected at about 10:00 on working days. Map data © OpenStreetMap contributors, map tiles © CARTO, address search by Photon (komoot), routes by OSRM or, with your own key, OpenRouteService.
