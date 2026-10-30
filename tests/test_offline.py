@@ -155,8 +155,8 @@ class OfflineTest(unittest.TestCase):
         resp = self.ctx.request.get(urllib.parse.urljoin(self.base + "/" + PAGE, href))
         self.assertEqual(resp.status, 200)
         m = resp.json()
-        self.assertEqual(m["name"], "Trip fuel calculator")
-        self.assertEqual(m["short_name"], "Fuel")
+        self.assertEqual(m["name"], "Litras")
+        self.assertEqual(m["short_name"], "Litras")
         self.assertEqual(m["start_url"], "./fuel-calculator.html")
         self.assertEqual(m["scope"], "./")
         self.assertEqual(m["display"], "standalone")
@@ -298,7 +298,7 @@ class OfflineTest(unittest.TestCase):
             p.wait_for_timeout(100)
         keys = p.evaluate("caches.keys()")
         self.assertIn("other-project", keys)
-        self.assertIn("fc-v1", keys)
+        self.assertIn("fc-v2", keys)
         self.assertNotIn("fc-old", keys)
 
     def test_server_error_keeps_cached_prices(self):

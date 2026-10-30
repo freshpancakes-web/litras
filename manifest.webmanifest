@@ -1,6 +1,6 @@
 {
-  "name": "Trip fuel calculator",
-  "short_name": "Fuel",
+  "name": "Litras",
+  "short_name": "Litras",
   "description": "Fuel use and cost of a car trip in Lithuania.",
   "start_url": "./fuel-calculator.html",
   "scope": "./",
