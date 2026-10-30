@@ -81,11 +81,14 @@ class HistoryTests(unittest.TestCase):
         self.assertEqual(merged, [point("2027-01-04", 2.0)])
 
     def test_keeps_only_the_window(self):
-        old = [point("2026-11-%02d" % d) for d in range(1, 31)]
-        merged = up.merge_history([point("2026-12-01")], old, "2026-12-01")
+        self.assertGreaterEqual(up.HISTORY_DAYS, 260)   # a year of working days for the 1Y chart
+        start = dt.date(2025, 1, 1)
+        old = [point((start + dt.timedelta(days=i)).isoformat()) for i in range(up.HISTORY_DAYS + 20)]
+        latest = (start + dt.timedelta(days=up.HISTORY_DAYS + 20)).isoformat()
+        merged = up.merge_history([point(latest)], old, latest)
         self.assertEqual(len(merged), up.HISTORY_DAYS)
-        self.assertEqual(merged[-1]["date"], "2026-12-01")
-        self.assertEqual(merged[0]["date"], "2026-11-02")
+        self.assertEqual(merged[-1]["date"], latest)
+        self.assertEqual(merged[0]["date"], old[-(up.HISTORY_DAYS - 1)]["date"])
 
     def test_drops_days_after_the_files_own_date(self):
         merged = up.merge_history([point("2026-12-01")], [point("2026-12-02")], "2026-12-01")

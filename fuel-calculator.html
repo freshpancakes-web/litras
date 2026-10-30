@@ -230,12 +230,21 @@ details[open] summary { margin-bottom: 14px; }
 .stlist .p { font-size: 15px; font-weight: 600; color: var(--accent); }
 .stlist small { display: block; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
 .price-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: end; }
-.trend { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+.trend { display: flex; flex-direction: column; gap: 10px; font-size: 14px; }
 .trend[hidden] { display: none; }
-#trendChart { display: block; width: 100%; height: auto; overflow: visible; }
+.trend-range { max-width: 210px; }
+.trend-range span { padding: 4px; font-size: 13px; }
+.trend-plot { position: relative; }
+#trendChart { display: block; width: 100%; height: auto; overflow: visible; touch-action: pan-y; cursor: crosshair; border-radius: 4px; }
+.trend-area { fill: var(--accent-soft); }
+.trend-grid { stroke: var(--line); stroke-width: 1; }
 .trend-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.trend-dot { fill: var(--accent); stroke: var(--bg); stroke-width: 2; }
-.trend-axis { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+.trend-dot, .trend-marker { fill: var(--accent); stroke: var(--bg); stroke-width: 2; }
+.trend-cursor { fill: var(--muted); }
+.trend-xtick, .trend-ytick { fill: var(--muted); font-size: 11px; }
+.trend-tip { position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 5; pointer-events: none; white-space: nowrap; padding: 6px 10px; font-size: 12px; line-height: 1.4; color: var(--muted); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 8px; box-shadow: var(--shadow); }
+.trend-tip[hidden] { display: none; }
+.trend-tip b { display: block; color: var(--ink); font-size: 13px; font-weight: 600; }
 #price { font-size: 20px; font-weight: 500; height: 48px; }
 .price-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; padding-bottom: 4px; }
 
@@ -430,8 +439,15 @@ details[open] summary { margin-bottom: 14px; }
       </div>
       <div class="trend" id="priceTrend" hidden>
         <div id="trendText"></div>
-        <svg id="trendChart" viewBox="0 0 360 72" role="img"></svg>
-        <div class="trend-axis"><span id="trendFrom"></span><span id="trendTo"></span></div>
+        <div class="seg trend-range" role="radiogroup" aria-label="Trend range">
+          <label><input type="radio" name="trendRange" value="5d"><span>5D</span></label>
+          <label><input type="radio" name="trendRange" value="30d" checked><span>30D</span></label>
+          <label><input type="radio" name="trendRange" value="1y"><span>1Y</span></label>
+        </div>
+        <div class="trend-plot">
+          <svg id="trendChart" role="img" tabindex="0"></svg>
+          <div class="trend-tip" id="trendTip" aria-live="polite" hidden></div>
+        </div>
       </div>
       <div class="hint" id="priceNote"></div>
       <details>
@@ -627,45 +643,151 @@ function renderStations(rows, field) {
 /* ---------- Price trend ---------- */
 
 const shortDate = (iso) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
-const TREND_WEEK = 5;   // working days, as the history has one point per working day
+const monthName = (iso) => new Date(iso).toLocaleDateString("en-GB", { month: "short", timeZone: "UTC" });
+const SVG_NS = "http://www.w3.org/2000/svg";
+const TREND_H = 150, TREND_M = { top: 8, right: 46, bottom: 20, left: 2 };
+const TREND_WORKING_DAYS = { "5d": 5, "30d": 30 };
+let trend = null;   // what is drawn now: { pts, xy, fuel, width }
 
 function changeWords(from, to) {
   const ct = Math.round((to - from) * 1000) / 10;
   return ct === 0 ? "Unchanged" : (ct > 0 ? "Up " : "Down ") + fmt(Math.abs(ct), 1) + " ct";
 }
 
+function svgEl(parent, name, attrs, text) {
+  const el = document.createElementNS(SVG_NS, name);
+  Object.keys(attrs).forEach((k) => el.setAttribute(k, attrs[k]));
+  if (text != null) el.textContent = text;
+  parent.appendChild(el);
+  return el;
+}
+
+// 5D and 30D count working days, like trading days on a stock chart. 1Y is the last 12 months.
+function trendRangePoints(all, range) {
+  if (range !== "1y") return all.slice(-TREND_WORKING_DAYS[range]);
+  const from = new Date(all[all.length - 1].date);
+  from.setUTCFullYear(from.getUTCFullYear() - 1);
+  const cutoff = from.toISOString().slice(0, 10);
+  return all.filter((h) => h.date >= cutoff);
+}
+
+function trendXTicks(pts, xy, range) {
+  let picks;
+  if (range === "1y") {
+    picks = pts.map((h, i) => i).filter((i) => i === 0 || pts[i].date.slice(0, 7) !== pts[i - 1].date.slice(0, 7));
+  } else {
+    picks = pts.map((h, i) => i);
+  }
+  const label = range === "1y" ? (i) => monthName(pts[i].date) : (i) => shortDate(pts[i].date);
+  const gap = range === "1y" ? 30 : 72;
+  const kept = [];
+  for (let n = picks.length - 1, right = Infinity; n >= 0; n--) {   // from the newest, so today is always labelled
+    if (right - xy[picks[n]][0] >= gap) { kept.unshift(picks[n]); right = xy[picks[n]][0]; }
+  }
+  return kept.map((i) => ({ x: xy[i][0], text: label(i) }));
+}
+
 // National averages from prices.js, so the trend doesn't follow the network and municipality filters.
 function renderTrend() {
   const box = $("priceTrend"), fuel = car().fuel;
-  const pts = (lea && Array.isArray(lea.history) ? lea.history : []).filter((h) => h[fuel] != null);
-  box.hidden = pts.length < 2;
+  const all = (lea && Array.isArray(lea.history) ? lea.history : []).filter((h) => h[fuel] != null);
+  box.hidden = all.length < 2;
+  trend = null;
+  $("trendTip").hidden = true;
   if (box.hidden) return;
 
-  const last = pts[pts.length - 1], first = pts[0], vals = pts.map((h) => h[fuel]);
+  const range = document.querySelector('input[name="trendRange"]:checked').value;
+  const pts = trendRangePoints(all, range);
+  const first = pts[0], last = pts[pts.length - 1], vals = pts.map((h) => h[fuel]);
   let text = "National average " + fmt(last[fuel], 3) + " EUR/l. " + changeWords(first[fuel], last[fuel]) + " since " + shortDate(first.date) + ".";
-  if (pts.length > TREND_WEEK) text += " " + changeWords(pts[pts.length - 1 - TREND_WEEK][fuel], last[fuel]) + " over the last " + TREND_WEEK + " working days.";
+  if (range === "1y" && new Date(last.date) - new Date(first.date) < 358 * 864e5) text += " Data starts " + fmtDate(first.date) + ".";
   $("trendText").textContent = text;
-  $("trendFrom").textContent = shortDate(first.date);
-  $("trendTo").textContent = shortDate(last.date);
 
-  const W = 360, H = 72, PAD = 6;
-  const lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals), span = hi - lo || 1;
+  const W = box.querySelector(".trend-plot").clientWidth || 360, H = TREND_H, M = TREND_M;
+  const plotW = W - M.left - M.right, top = M.top, bottom = H - M.bottom;
+  const lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
   const xy = pts.map((h, i) => [
-    PAD + i * (W - 2 * PAD) / (pts.length - 1),
-    hi === lo ? H / 2 : PAD + (hi - h[fuel]) / span * (H - 2 * PAD)
+    M.left + i * plotW / (pts.length - 1),
+    hi === lo ? (top + bottom) / 2 : top + (hi - h[fuel]) / (hi - lo) * (bottom - top)
   ].map((n) => Math.round(n * 10) / 10));
-  const svg = $("trendChart"), NS = "http://www.w3.org/2000/svg";
+
+  const svg = $("trendChart");
+  svg.setAttribute("viewBox", "0 0 " + W + " " + H);
   svg.setAttribute("aria-label", text);
   svg.innerHTML = "";
-  const line = document.createElementNS(NS, "polyline");
-  line.setAttribute("class", "trend-line");
-  line.setAttribute("points", xy.map((p) => p.join(",")).join(" "));
-  const dot = document.createElementNS(NS, "circle");
-  dot.setAttribute("class", "trend-dot");
-  dot.setAttribute("cx", xy[xy.length - 1][0]);
-  dot.setAttribute("cy", xy[xy.length - 1][1]);
-  dot.setAttribute("r", 5);
-  svg.append(line, dot);
+  const yTicks = hi === lo ? [[hi, xy[0][1]]] : [[hi, top], [lo, bottom]];
+  yTicks.forEach((t) => {
+    svgEl(svg, "line", { class: "trend-grid", x1: M.left, x2: M.left + plotW, y1: t[1], y2: t[1] });
+    svgEl(svg, "text", { class: "trend-ytick", x: W, y: t[1] + 4, "text-anchor": "end" }, fmt(t[0], 3));
+  });
+  const line = xy.map((p) => p.join(",")).join(" ");
+  svgEl(svg, "polygon", { class: "trend-area", points: M.left + "," + bottom + " " + line + " " + (M.left + plotW) + "," + bottom });
+  svgEl(svg, "polyline", { class: "trend-line", points: line });
+  svgEl(svg, "circle", { class: "trend-dot", cx: xy[xy.length - 1][0], cy: xy[xy.length - 1][1], r: 4 });
+  trendXTicks(pts, xy, range).forEach((t) => {
+    const anchor = t.x < M.left + 20 ? "start" : t.x > M.left + plotW - 20 ? "end" : "middle";
+    svgEl(svg, "text", { class: "trend-xtick", x: t.x, y: H - 4, "text-anchor": anchor }, t.text);
+  });
+  trend = { pts, xy, fuel, width: W, cursor: svgEl(svg, "g", {}), active: -1 };
+}
+
+function showTrendPoint(i) {
+  if (!trend) return;
+  trend.active = Math.max(0, Math.min(trend.pts.length - 1, i));
+  const p = trend.pts[trend.active], first = trend.pts[0][trend.fuel], at = trend.xy[trend.active];
+  const ct = Math.round((p[trend.fuel] - first) * 1000) / 10;
+  const change = trend.active === 0 ? "Start of this range"
+    : ct === 0 ? "No change from the start of this range"
+    : (ct > 0 ? "+" : "−") + fmt(Math.abs(ct), 1) + " ct from the start of this range";
+  trend.cursor.innerHTML = "";
+  svgEl(trend.cursor, "rect", { class: "trend-cursor", x: at[0] - 0.5, y: TREND_M.top, width: 1, height: TREND_H - TREND_M.top - TREND_M.bottom });
+  svgEl(trend.cursor, "circle", { class: "trend-marker", cx: at[0], cy: at[1], r: 5 });
+  const tip = $("trendTip");
+  tip.innerHTML = "";
+  const b = document.createElement("b");
+  b.textContent = fmtDate(p.date);
+  tip.append(b, fmt(p[trend.fuel], 3) + " EUR/l", document.createElement("br"), change);
+  tip.hidden = false;
+  const left = Math.max(0, Math.min(trend.width - tip.offsetWidth, at[0] - tip.offsetWidth / 2));
+  tip.style.left = left + "px";
+}
+
+function hideTrendPoint() {
+  if (!trend) return;
+  trend.active = -1;
+  trend.cursor.innerHTML = "";
+  $("trendTip").hidden = true;
+}
+
+function trendPointAt(e) {
+  const rect = $("trendChart").getBoundingClientRect(), plotW = trend.width - TREND_M.left - TREND_M.right;
+  return Math.round((e.clientX - rect.left - TREND_M.left) / plotW * (trend.pts.length - 1));
+}
+
+function wireTrend() {
+  const svg = $("trendChart");
+  const onPoint = (e) => { if (trend) showTrendPoint(trendPointAt(e)); };
+  svg.addEventListener("pointerdown", onPoint);
+  svg.addEventListener("pointermove", onPoint);
+  svg.addEventListener("pointerleave", (e) => { if (e.pointerType === "mouse") hideTrendPoint(); });
+  document.addEventListener("pointerdown", (e) => { if (!svg.contains(e.target)) hideTrendPoint(); });
+  svg.addEventListener("focus", () => { if (trend && trend.active < 0) showTrendPoint(trend.pts.length - 1); });
+  svg.addEventListener("blur", hideTrendPoint);
+  svg.addEventListener("keydown", (e) => {
+    if (!trend) return;
+    const n = trend.pts.length - 1;
+    const to = { ArrowLeft: trend.active - 1, ArrowRight: trend.active + 1, Home: 0, End: n }[e.key];
+    if (to !== undefined) { e.preventDefault(); showTrendPoint(to); }
+    else if (e.key === "Escape") hideTrendPoint();
+  });
+  document.querySelectorAll('input[name="trendRange"]').forEach((r) => r.addEventListener("change", () => {
+    store.set("fc.trendRange", r.value);
+    renderTrend();
+  }));
+  addEventListener("resize", renderTrend);
+  const saved = store.get("fc.trendRange");
+  const pick = saved && document.querySelector('input[name="trendRange"][value="' + saved + '"]');
+  if (pick) pick.checked = true;
 }
 
 function applyPriceToInput() {
@@ -1274,6 +1396,7 @@ syncMinibar();
 
 syncThemeButton();
 
+wireTrend();
 const savedBasis = store.get("fc.basis");
 if (savedBasis) { const r = document.querySelector('input[name="basis"][value="' + savedBasis + '"]'); if (r) r.checked = true; }
 loadLea();
