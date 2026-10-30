@@ -353,6 +353,22 @@ class AppTest(unittest.TestCase):
         page.wait_for_timeout(500)
         self.assertEqual(osrm, [])
 
+    def test_file_url_has_no_service_worker(self):
+        ctx = self.browser.new_context(viewport={"width": 1280, "height": 900}, locale="en-GB")
+        self.contexts.append(ctx)
+        page = ctx.new_page()
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.route(re.compile(r"^https?://"), lambda r: r.abort())
+        page.goto("file://" + os.path.join(ROOT, PAGE))
+        page.wait_for_selector("#priceState")
+        self.assertTrue(page.input_value("#price"))
+        self.assertTrue(page.inner_text("#rCost").strip())
+        self.assertFalse(page.evaluate("navigator.serviceWorker ? !!navigator.serviceWorker.controller : false"))
+        regs = page.evaluate("navigator.serviceWorker ? navigator.serviceWorker.getRegistrations().then(r => r.length, () => 0) : 0")
+        self.assertEqual(regs, 0)
+        self.assertEqual(errors, [])
+
     # ----- secrets -----
 
     def test_no_secret_tracked(self):

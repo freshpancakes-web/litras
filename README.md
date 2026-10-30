@@ -14,10 +14,17 @@ Open it: **https://freshpancakes-web.github.io/special-palm-tree/**
 
 Everything you enter stays in your browser (`localStorage`).
 
+## Install on your phone
+- iPhone: open the page in Safari, tap Share, then Add to Home Screen.
+- Android: open the page in Chrome, tap the menu, then Install app.
+
+Once opened online, the page opens offline too. Offline, the calculator, your cars and your saved trips work. The map and new routes need a connection (a note on the page says so). The prices shown offline are the last ones downloaded, and the price label shows their date. When you are online again the page picks up the newest prices on its own.
+
 ## Files
 | File | Purpose |
 |---|---|
 | `fuel-calculator.html` | The whole app. It also works when opened straight from the file. |
+| `manifest.webmanifest`, `sw.js`, `icons/` | Make the page installable and let it open offline. `sw.js` never caches `config.js`; change `CACHE_NAME` in it to replace the cached copy in a release. |
 | `prices.js` | Station prices, written by `update_prices.py`. Don't edit it by hand. |
 | `update_prices.py` | Downloads the LEA Excel file and writes `prices.js`. Python 3 standard library only. |
 | `schedule_prices.sh` | Optional: installs a macOS job that runs `update_from_github.sh` on weekdays at 10:45, 12:00 and 15:00. |
