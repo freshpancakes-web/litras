@@ -267,7 +267,7 @@ class AppTest(unittest.TestCase):
         page = self.open()
         self.assertEqual(page.title(), "Litras: trip fuel calculator")
         self.assertEqual(page.inner_text("h1"), "Litras")
-        self.assertIn("Fuel use and cost", page.inner_text("header"))
+        self.assertIn("What will this drive cost you?", page.inner_text("header"))
         self.assertGreater(page.evaluate("document.querySelector('header img').naturalWidth"), 0)
         self.assertEqual(page.get_attribute("header img", "alt"), "")
         self.assertEqual(page.get_attribute('link[rel="icon"]', "href"), "icons/icon.svg")
