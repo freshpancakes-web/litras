@@ -119,7 +119,8 @@ class AppTest(unittest.TestCase):
             route.abort()
             return
         with open(FIXTURE, encoding="utf-8") as f:
-            body = f.read().replace("__TODAY__", datetime.date.today().isoformat())
+            day = datetime.date.today() - datetime.timedelta(days=5 if mode == "old" else 0)
+            body = f.read().replace("__TODAY__", day.isoformat())
         route.fulfill(content_type="text/javascript; charset=utf-8", body=body)
 
     def _json(self, route, data, status=200):
@@ -166,6 +167,18 @@ class AppTest(unittest.TestCase):
         self.open(prices="none")
         self.assertEqual(self.value("price"), "1.925")
         self.assertEqual(self.text("priceState"), "bundled")
+
+    def test_stale_prices_on_http_do_not_mention_the_script(self):
+        self.open(prices="old")
+        note = self.text("priceNote")
+        self.assertIn("This data is 5 days old. Go online to refresh it.", note)
+        self.assertNotIn("update_prices.py", note)
+
+    def test_missing_prices_on_http_do_not_mention_the_script(self):
+        self.open(prices="none")
+        note = self.text("priceNote")
+        self.assertIn("prices.js was not found", note)
+        self.assertNotIn("update_prices.py", note)
 
     def test_network_cheapest_changes_price(self):
         page = self.open()

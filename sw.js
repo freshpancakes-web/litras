@@ -29,20 +29,36 @@ self.addEventListener("install", (event) => {
 
 self.addEventListener("activate", (event) => {
   event.waitUntil((async () => {
-    for (const name of await caches.keys()) if (name !== CACHE_NAME) await caches.delete(name);
+    // Cache storage is shared by every project on this origin, so only touch our own (fc-) caches.
+    for (const name of await caches.keys()) if (name.startsWith("fc-") && name !== CACHE_NAME) await caches.delete(name);
     await self.clients.claim();
   })());
 });
 
 function timeout(ms) { return new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms)); }
 
-// Network first, then the cache. fresh() revalidates, so the browser's own HTTP cache can't serve old files.
+// config.js holds a key and is never cached. It is parser-blocking, so a slow network must not stall the page:
+// give up after the timeout and answer with an empty script (the page works without it).
+async function configJs(request) {
+  try {
+    return await Promise.race([fetch(request), timeout(NETWORK_TIMEOUT_MS)]);
+  } catch (e) {
+    return new Response("", { status: 200, headers: { "Content-Type": "text/javascript" } });
+  }
+}
+
+// Network first, then the cache. A server error also falls back to the cache, and only ok responses are stored.
+// The no-cache option makes the fetch revalidate, so the browser's own HTTP cache can't serve old files.
 async function networkFirst(request, cacheKey, matchOptions) {
   const cache = await caches.open(CACHE_NAME);
   try {
     const res = await Promise.race([fetch(new Request(request, { cache: "no-cache" })), timeout(NETWORK_TIMEOUT_MS)]);
-    if (res && res.ok) cache.put(cacheKey, res.clone());
-    return res;
+    if (res && res.ok) {
+      cache.put(cacheKey, res.clone());
+      return res;
+    }
+    const hit = await cache.match(cacheKey, matchOptions);
+    return hit || res;
   } catch (e) {
     const hit = await cache.match(cacheKey, matchOptions);
     if (hit) return hit;
@@ -78,7 +94,10 @@ self.addEventListener("fetch", (event) => {
   if (url.origin === self.location.origin) {
     const scope = new URL("./", self.location).pathname;
     const name = url.pathname.slice(scope.length);
-    if (name === "prices.js") {
+    if (name === "config.js") {
+      // Before the navigate branch, so a direct visit to /config.js is never cached either.
+      event.respondWith(configJs(req));
+    } else if (name === "prices.js") {
       // One cache entry, whatever the ?t= value is.
       const key = new URL("prices.js", self.location).href;
       event.respondWith(networkFirst(req, key, { ignoreSearch: true }));
@@ -90,7 +109,7 @@ self.addEventListener("fetch", (event) => {
     } else if (name === "manifest.webmanifest" || name.startsWith("icons/")) {
       event.respondWith(cacheFirst(req));
     }
-    return;   // config.js and anything else on this site: not intercepted
+    return;   // anything else on this site: not intercepted
   }
   if (url.hostname === "cdnjs.cloudflare.com" && /\/leaflet\/1\.9\.4\//.test(url.pathname)) {
     event.respondWith(cacheFirst(req));

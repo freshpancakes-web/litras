@@ -1,7 +1,8 @@
 """Install and offline tests for the Trip Fuel Calculator.
 
 These run the real service worker (sw.js) against a local server whose prices.js and config.js can change
-between loads, so the worker sees real responses. Going offline is context.set_offline(True).
+between loads, so the worker sees real responses. Going offline is context.set_offline(True) plus State.down, which makes the
+server drop every connection (set_offline alone does not reach the worker's own fetch).
 Run with:  python -m unittest tests.test_offline -v   (locally set FC_BROWSER_CHANNEL=chrome)
 """
 import base64
@@ -13,6 +14,7 @@ import os
 import re
 import struct
 import threading
+import time
 import unittest
 import urllib.parse
 
@@ -35,7 +37,11 @@ def fmt_date(d):
 
 class State:
     prices_date = datetime.date.today()
+    prices_status = 200
     config = None
+    config_delay = 0
+    sw_suffix = ""
+    down = False
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -44,11 +50,22 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         path = urllib.parse.urlparse(self.path).path
+        if State.down:
+            self.close_connection = True   # no response at all, like a dead network
+            return
+        if path == "/sw.js":
+            with open(os.path.join(ROOT, "sw.js"), encoding="utf-8") as f:
+                body = (f.read() + State.sw_suffix).encode("utf-8")
+            return self.send_body(200, "text/javascript", body)
         if path == "/prices.js":
+            if State.prices_status != 200:
+                return self.send_body(State.prices_status, "text/plain", b"server error")
             with open(FIXTURE, encoding="utf-8") as f:
                 body = f.read().replace("__TODAY__", State.prices_date.isoformat()).encode("utf-8")
             return self.send_body(200, "text/javascript; charset=utf-8", body)
         if path == "/config.js":
+            if State.config_delay:
+                time.sleep(State.config_delay)
             if State.config is None:
                 return self.send_body(404, "text/plain", b"not found")
             return self.send_body(200, "text/javascript", State.config.encode("utf-8"))
@@ -82,14 +99,24 @@ class OfflineTest(unittest.TestCase):
     def setUp(self):
         State.prices_date = datetime.date.today()
         State.config = None
+        State.config_delay = 0
+        State.prices_status = 200
+        State.sw_suffix = ""
+        State.down = False
+        self.tiles = []
         self.ctx = self.browser.new_context(viewport={"width": 1280, "height": 900}, locale="en-GB")
         self.addCleanup(self.ctx.close)
-        self.ctx.route(re.compile(r"^https://(tile\.openstreetmap\.org|[^/]*basemaps\.cartocdn\.com)/"),
-                       lambda r: r.fulfill(content_type="image/png", headers=CORS, body=PNG))
+        self.ctx.route(re.compile(r"^https://(tile\.openstreetmap\.org|[^/]*basemaps\.cartocdn\.com)/"), self.tile)
         self.ctx.set_default_timeout(8000)
         self.page = self.ctx.new_page()
         self.errors = []
         self.page.on("pageerror", lambda e: self.errors.append(str(e)))
+
+    def tile(self, route):
+        if State.down:
+            return route.abort()   # tiles fail while offline, like on a real phone
+        self.tiles.append(route.request.url)
+        route.fulfill(content_type="image/png", headers=CORS, body=PNG)
 
     def load(self):
         """Open the page and wait until the service worker controls it, then reload so it serves the page."""
@@ -108,7 +135,12 @@ class OfflineTest(unittest.TestCase):
         return self.page.input_value("#" + id_)
 
     def go_offline(self):
-        self.ctx.set_offline(True)
+        State.down = True            # the worker's own fetch hits a dead server
+        self.ctx.set_offline(True)   # navigator.onLine goes false
+
+    def go_online(self):
+        State.down = False
+        self.ctx.set_offline(False)
 
     def reload_offline(self):
         self.go_offline()
@@ -145,12 +177,16 @@ class OfflineTest(unittest.TestCase):
         self.assertTrue(p.get_attribute('meta[name="theme-color"]', "content"))
 
     def test_offline_keeps_prices_and_date(self):
+        old = datetime.date.today() - datetime.timedelta(days=2)
+        State.prices_date = old
         self.load()
         price = self.value("price")
         self.assertTrue(price)
+        State.prices_date = datetime.date.today()   # the server now has newer prices; offline must not show them
         self.reload_offline()
         self.assertEqual(self.value("price"), price)
-        self.assertIn(fmt_date(State.prices_date), self.text("priceState"))
+        self.assertIn(fmt_date(old), self.text("priceState"))
+        self.assertNotIn(fmt_date(State.prices_date), self.text("priceState"))
         self.assertTrue(re.search(r"\d", self.text("rCost")))
         self.assertEqual(self.errors, [])
 
@@ -173,8 +209,24 @@ class OfflineTest(unittest.TestCase):
         self.go_offline()
         p.wait_for_selector("#mapNote", state="visible")
         self.assertEqual(self.text("mapNote"), OFFLINE_NOTE)
-        self.ctx.set_offline(False)
+        self.go_online()
         p.wait_for_selector("#mapNote", state="hidden")
+
+    def test_map_tiles_reload_when_back_online(self):
+        p = self.load()
+        p.wait_for_function("document.querySelectorAll('.leaflet-tile-loaded').length > 0")
+        p.wait_for_timeout(500)
+        self.go_offline()
+        p.wait_for_selector("#mapNote", state="visible")
+        p.evaluate("map.panBy([300, 0], {animate: false})")   # new tiles are asked for and fail
+        p.wait_for_timeout(500)
+        self.tiles.clear()
+        self.go_online()
+        p.wait_for_selector("#mapNote", state="hidden")
+        deadline = time.time() + 5
+        while not self.tiles and time.time() < deadline:
+            p.wait_for_timeout(100)
+        self.assertTrue(self.tiles, "no tile was requested again after reconnecting")
 
     def test_online_gets_new_prices_after_cache(self):
         State.prices_date = datetime.date.today() - datetime.timedelta(days=2)
@@ -189,7 +241,9 @@ class OfflineTest(unittest.TestCase):
         self.load()
         price = self.value("price")
         self.reload_offline()
-        self.page.click("#priceRefresh")
+        with self.page.expect_request(lambda r: "prices.js?t=" in r.url):
+            self.page.click("#priceRefresh")
+        # The button is disabled while the reload runs; wait for it to be done.
         self.page.wait_for_function("!document.querySelector('#priceRefresh').disabled")
         self.assertEqual(self.value("price"), price)
         self.assertIn(fmt_date(State.prices_date), self.text("priceState"))
@@ -197,7 +251,12 @@ class OfflineTest(unittest.TestCase):
 
     def test_config_never_cached(self):
         State.config = 'window.FC_CONFIG = { cartoKey: "%s" };' % FAKE_KEY
+        requested = []
+        self.page.on("request", lambda r: requested.append(r.url))
         p = self.load()
+        self.assertTrue([u for u in requested if u.endswith("/config.js")], "the page never asked for config.js")
+        direct = p.goto(self.base + "/config.js")
+        self.assertIn(FAKE_KEY, direct.text())   # the visit itself works; it just must not be cached
         found = p.evaluate("""async () => {
             const out = [];
             for (const name of await caches.keys()) {
@@ -214,6 +273,43 @@ class OfflineTest(unittest.TestCase):
             self.assertNotIn("config.js", url)
             if "image" not in url and not url.endswith(".png"):
                 self.assertNotIn(FAKE_KEY, body, url)
+
+    def test_stalled_config_does_not_freeze_the_page(self):
+        State.config = 'window.FC_CONFIG = { cartoKey: "%s" };' % FAKE_KEY
+        self.load()
+        State.config_delay = 10
+        self.page.reload(wait_until="commit")
+        self.page.wait_for_function("document.querySelector('#price') && document.querySelector('#price').value !== ''",
+                                    timeout=5000)
+        self.assertEqual(self.errors, [])
+
+    def test_activation_keeps_other_projects_caches(self):
+        p = self.load()
+        p.evaluate("""async () => {
+            await caches.open("other-project");
+            await caches.open("fc-old");
+        }""")
+        State.sw_suffix = "\n// a new release\n"
+        p.evaluate("navigator.serviceWorker.getRegistration().then((r) => r.update())")
+        deadline = time.time() + 8
+        while "fc-old" in p.evaluate("caches.keys()") and time.time() < deadline:
+            p.wait_for_timeout(100)
+        keys = p.evaluate("caches.keys()")
+        self.assertIn("other-project", keys)
+        self.assertIn("fc-v1", keys)
+        self.assertNotIn("fc-old", keys)
+
+    def test_server_error_keeps_cached_prices(self):
+        old = datetime.date.today() - datetime.timedelta(days=2)
+        State.prices_date = old
+        self.load()
+        price = self.value("price")
+        State.prices_status = 503
+        self.page.reload()
+        self.page.wait_for_selector("#priceState")
+        self.assertIn(fmt_date(old), self.text("priceState"))
+        self.assertEqual(self.value("price"), price)
+        self.assertNotIn("not found", self.text("priceNote"))
 
     def test_attribution_visible_offline(self):
         self.load()

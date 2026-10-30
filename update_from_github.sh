@@ -27,10 +27,11 @@ main() {
   fi
 
   if [ -x "$GH" ]; then
-    if "$GH" workflow run update-prices.yml >/dev/null 2>&1; then
+    local gh_out
+    if gh_out="$("$GH" workflow run update-prices.yml 2>&1)"; then
       log "Asked GitHub to update the prices."
     else
-      log "gh failed to start the price job; continuing without it."
+      log "gh failed to start the price job; continuing without it: $(echo "$gh_out" | tr '\n' ' ')"
     fi
   else
     log "gh not found at $GH; skipping the trigger."

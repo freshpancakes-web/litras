@@ -53,7 +53,7 @@ class SyncTests(unittest.TestCase):
         git(self.tmp, "clone", self.origin, self.pusher)
         self.gh_log = os.path.join(self.tmp, "gh.log")
         self.gh = os.path.join(self.tmp, "gh")
-        write(self.gh, '#!/bin/sh\necho "$@" >> "%s"\nexit ${FAKE_GH_EXIT:-0}\n' % self.gh_log)
+        write(self.gh, '#!/bin/sh\necho "$@" >> "%s"\n[ -n "$FAKE_GH_ERR" ] && echo "$FAKE_GH_ERR" >&2\nexit ${FAKE_GH_EXIT:-0}\n' % self.gh_log)
         os.chmod(self.gh, 0o755)
 
     def push_new_prices(self, date="2026-10-29"):
@@ -117,10 +117,11 @@ class SyncTests(unittest.TestCase):
 
     def test_failing_gh_still_pulls(self):
         self.push_new_prices()
-        r, out = self.run_script(FAKE_GH_EXIT="1")
+        r, out = self.run_script(FAKE_GH_EXIT="1", FAKE_GH_ERR="keychain locked: no auth token found")
         self.assertEqual(r.returncode, 0, out)
         self.assertEqual(read(os.path.join(self.clone, "prices.js")), prices("2026-10-29"))
         self.assertRegex(out, r"(?i)gh.*fail")
+        self.assertIn("keychain locked: no auth token found", out)
 
     def test_triggers_the_price_job(self):
         r, out = self.run_script()

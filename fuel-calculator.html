@@ -568,6 +568,7 @@ function calc() {
 
 const PRICE_SOURCE_LINE = "Source: Lithuanian Energy Agency (LEA) and the companies operating the stations. Prices are collected on working days at about 10:00.";
 
+const ON_WEB = location.protocol === "http:" || location.protocol === "https:";   // opened from a site, not the file
 const daysOld = (iso) => Math.round((new Date(today()) - new Date(iso)) / 864e5);
 const fmtDate = (iso) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 
@@ -632,7 +633,7 @@ function applyPriceToInput() {
       value = document.querySelector('input[name="basis"]:checked').value === "min" ? min : avg;
       note.textContent = rows.length + " stations match. Average " + fmt(avg, 3) + ", cheapest " + fmt(min, 3) +
         ", highest " + fmt(max, 3) + " EUR/l. " +
-        (age > 3 ? "This data is " + age + " days old, run update_prices.py to refresh it. " : "") + PRICE_SOURCE_LINE;
+        (age > 3 ? "This data is " + age + (ON_WEB ? " days old. Go online to refresh it. " : " days old, run update_prices.py to refresh it. ") : "") + PRICE_SOURCE_LINE;
       renderStations(rows, field);
       $("stationsSummary").textContent = "Cheapest stations (" + Math.min(8, rows.length) + " of " + rows.length + ")";
     } else {
@@ -643,7 +644,8 @@ function applyPriceToInput() {
     state.textContent = "bundled";
     state.classList.remove("live");
     note.textContent = "prices.js was not found next to this page, so the EU bulletin average of 12 Oct 2026 is used" +
-      (value == null ? " (it has no LPG price, type one in)" : "") + ". Run update_prices.py to get daily station prices.";
+      (value == null ? " (it has no LPG price, type one in)" : "") + "." +
+      (ON_WEB ? "" : " Run update_prices.py to get daily station prices.");
   }
   if (!priceDirty) $("price").value = value != null ? Math.round(value * 1000) / 1000 : "";
   calc();
@@ -681,7 +683,10 @@ function syncOfflineNote() {
   else if ($("mapNote").textContent === OFFLINE_NOTE) showMapNote("");
 }
 addEventListener("offline", syncOfflineNote);
-addEventListener("online", syncOfflineNote);
+addEventListener("online", () => {
+  syncOfflineNote();
+  if (tileLayer) tileLayer.redraw();   // Leaflet doesn't retry tiles that failed while offline
+});
 
 function initMap() {
   if (!window.L) { showMapNote(MAP_LIB_NOTE); syncOfflineNote(); return; }
