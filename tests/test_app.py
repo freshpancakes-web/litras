@@ -264,6 +264,87 @@ class AppTest(unittest.TestCase):
     def text_of(self, selector):
         return self.page.inner_text(selector)
 
+    # ----- keyboard support for address suggestions -----
+
+    def three_places(self, q):
+        names = ["Panevezys", "Pasvalys", "Pakruojis"]
+        return {"features": [{
+            "geometry": {"type": "Point", "coordinates": [24.0 + i / 10, 55.0]},
+            "properties": {"name": n, "country": "Lithuania"},
+        } for i, n in enumerate(names)]}
+
+    def open_suggestions(self, field="dest"):
+        """Open the app with 3 suggestions showing for the given input; returns (page, osrm_requests)."""
+        self.routes["photon"] = self.three_places
+        page = self.open()
+        osrm = []
+        page.on("request", lambda r: osrm.append(r.url) if "router.project-osrm.org" in r.url else None)
+        if field.startswith("stop"):
+            page.click("#addStop")
+        page.click("#" + field)
+        page.fill("#" + field, "")
+        page.type("#" + field, "Pan")
+        page.wait_for_selector("#%s ~ .sugg li, .sugg:not([hidden]) li" % field)
+        self.assertEqual(page.locator(".sugg:not([hidden]) li").count(), 3)
+        return page, osrm
+
+    def active_state(self, page, field):
+        return page.evaluate("""(id) => {
+            const input = document.getElementById(id);
+            const opts = [...document.getElementById(input.getAttribute('aria-controls')).querySelectorAll('li')];
+            const act = opts.map((li) => li.querySelector('button').classList.contains('active'));
+            return {index: act.indexOf(true), count: act.filter(Boolean).length,
+                    ad: input.getAttribute('aria-activedescendant'), ids: opts.map((li) => li.id)};
+        }""", field)
+
+    def check_arrows(self, page, field):
+        def at(i):
+            st = self.active_state(page, field)
+            self.assertEqual((st["index"], st["count"]), (i, 1))
+            self.assertEqual(st["ad"], st["ids"][i])
+        page.press("#" + field, "ArrowDown"); at(0)
+        page.press("#" + field, "ArrowDown")
+        page.press("#" + field, "ArrowDown"); at(2)
+        page.press("#" + field, "ArrowDown"); at(0)
+        page.press("#" + field, "ArrowUp"); at(2)
+
+    def test_arrow_keys_move_highlight(self):
+        page, _ = self.open_suggestions("dest")
+        self.check_arrows(page, "dest")
+        self.assertTrue(self.active_state(page, "dest")["ids"][0].startswith("destList-opt-"))
+
+    def test_enter_picks_highlighted_without_routing(self):
+        page, osrm = self.open_suggestions("dest")
+        page.press("#dest", "ArrowDown")
+        page.press("#dest", "Enter")
+        self.assertEqual(self.value("dest"), "Panevezys, Lithuania")
+        self.assertTrue(page.locator("#destList").is_hidden())
+        page.wait_for_timeout(500)
+        self.assertEqual(osrm, [])
+
+    def test_enter_without_highlight_routes(self):
+        page, osrm = self.open_suggestions("dest")
+        page.press("#dest", "Enter")
+        page.wait_for_timeout(1000)
+        self.assertTrue(osrm)
+
+    def test_escape_closes_and_clears(self):
+        page, _ = self.open_suggestions("dest")
+        page.press("#dest", "ArrowDown")
+        page.press("#dest", "Escape")
+        self.assertTrue(page.locator("#destList").is_hidden())
+        self.assertIsNone(page.get_attribute("#dest", "aria-activedescendant"))
+
+    def test_stop_field_has_keyboard_support(self):
+        page, osrm = self.open_suggestions("stop1In")
+        self.check_arrows(page, "stop1In")
+        page.press("#stop1In", "ArrowDown")  # wraps to first
+        page.press("#stop1In", "Enter")
+        self.assertEqual(self.value("stop1In"), "Panevezys, Lithuania")
+        self.assertTrue(page.locator("#stop1List").is_hidden())
+        page.wait_for_timeout(500)
+        self.assertEqual(osrm, [])
+
     # ----- secrets -----
 
     def test_no_secret_tracked(self):
