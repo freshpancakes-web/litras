@@ -6,13 +6,14 @@ Open it: **https://freshpancakes-web.github.io/special-palm-tree/**
 
 ## What it does
 - A list of cars with City, Mixed and Highway consumption you can edit, plus your own cars
+- Your current location as the starting point (the browser asks first), with a "Use my location" button
 - From and To with address suggestions, up to 8 stops, the route on a map, and a cost for each leg
 - Station prices by network and municipality (average or cheapest), the 8 cheapest stations, and a 5-day, 30-day and 1-year chart of the national average
 - Trips per week and saved trips, with a weekly and monthly cost
 - Measuring consumption from a fill-up
 - Light and dark mode
 
-Everything you enter stays in your browser (`localStorage`).
+Everything you enter stays in your browser (`localStorage`). Your location is only sent to the address and routing services, the same as a typed address, and is only kept if you save a trip.
 
 ## Install on your phone
 - iPhone: open the page in Safari, tap Share, then Add to Home Screen.
