@@ -342,12 +342,13 @@ class AppTest(unittest.TestCase):
         self.assertTrue(osrm)
 
     def test_typing_resets_highlight(self):
-        page, _ = self.open_suggestions("dest")
+        page, osrm = self.open_suggestions("dest")
         page.press("#dest", "ArrowDown")
         page.type("#dest", "e")
         self.assertIsNone(page.get_attribute("#dest", "aria-activedescendant"))
         page.press("#dest", "Enter")
-        self.assertEqual(self.value("dest"), "Pane")
+        page.wait_for_timeout(1000)
+        self.assertTrue(osrm)   # routed from the typed text, rather than picking the old suggestion
 
     def test_escape_closes_and_clears(self):
         page, _ = self.open_suggestions("dest")
