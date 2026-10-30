@@ -35,7 +35,7 @@ NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
 FUELS = {"95 benzinas": "petrol95", "Dyzelinas": "diesel", "SND": "lpg"}
 MIN_PRICE, MAX_PRICE = 0.3, 5.0          # EUR/l, anything outside is treated as a typing error
 MIN_STATIONS_PER_NETWORK = 5
-HISTORY_DAYS = 30
+HISTORY_DAYS = 270                       # working days, a little over a year for the 1Y chart
 MAX_AGE_DAYS = 7                         # long enough for Christmas and New Year without new prices
 
 

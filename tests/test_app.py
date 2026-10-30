@@ -247,24 +247,41 @@ class AppTest(unittest.TestCase):
         page.select_option("#newFuel", fuel)
         page.click("#addCar button[type=submit]")
 
+    @staticmethod
+    def long_history(first, last, step=1):
+        """Working days from first to last, with a price rising 0.001 per point."""
+        day, out = first, []
+        while day <= last:
+            if day.weekday() < 5:
+                out.append({"date": day.isoformat(), "petrol95": round(1.800 + 0.001 * len(out), 3), "diesel": None, "lpg": None})
+            day += datetime.timedelta(days=step)
+        return out
+
+    def point_xy(self, page, index):
+        """Page coordinates of a point on the drawn line, scrolled into view."""
+        page.locator("#trendChart").scroll_into_view_if_needed()
+        pts = page.get_attribute("#trendChart .trend-line", "points").split()
+        x, y = (float(n) for n in pts[index].split(","))
+        box = page.locator("#trendChart").bounding_box()
+        return box["x"] + x, box["y"] + y
+
+    def pick_range(self, page, value):
+        page.locator('label:has(input[name="trendRange"][value="%s"])' % value).click()
+
     def test_trend_states_change_for_the_cars_fuel(self):
         page = self.open(history=self.TREND)
         self.assertTrue(page.locator("#priceTrend").is_visible())
-        # 1.908 against 1.931 at the start, and against 1.970 five working days back
-        self.assertEqual(self.text("trendText"),
-                         "National average 1.908 EUR/l. Down 2.3 ct since 5 Oct. Down 6.2 ct over the last 5 working days.")
+        self.assertEqual(self.text("trendText"), "National average 1.908 EUR/l. Down 2.3 ct since 5 Oct.")
 
     def test_trend_follows_the_selected_car(self):
         page = self.open(history=self.TREND)
         self.add_car(page, "Test diesel", "diesel")
-        self.assertEqual(self.text("trendText"),
-                         "National average 2.248 EUR/l. Up 4.8 ct since 5 Oct. Up 2.8 ct over the last 5 working days.")
+        self.assertEqual(self.text("trendText"), "National average 2.248 EUR/l. Up 4.8 ct since 5 Oct.")
 
     def test_trend_skips_gaps_in_the_data(self):
         page = self.open(history=self.TREND)
         self.add_car(page, "Test LPG", "lpg")
-        self.assertEqual(self.text("trendText"),
-                         "National average 0.900 EUR/l. Unchanged since 6 Oct.")
+        self.assertEqual(self.text("trendText"), "National average 0.900 EUR/l. Unchanged since 6 Oct.")
         self.assertEqual(page.locator("#trendChart .trend-dot").count(), 1)
 
     def test_trend_chart_draws_every_point_and_is_described(self):
@@ -277,8 +294,6 @@ class AppTest(unittest.TestCase):
         self.assertEqual(ys.index(max(ys)), 6)
         self.assertEqual(page.get_attribute("#trendChart", "role"), "img")
         self.assertIn("Down 2.3 ct", page.get_attribute("#trendChart", "aria-label"))
-        self.assertEqual(self.text("trendFrom"), "5 Oct")
-        self.assertEqual(self.text("trendTo"), "14 Oct")
 
     def test_trend_hidden_without_enough_data(self):
         cases = {"no history": dict(history=[]), "one point": dict(history=self.TREND[:1]),
@@ -294,6 +309,161 @@ class AppTest(unittest.TestCase):
                 page = self.open(theme=theme, width=360, history=self.TREND)
                 self.assertTrue(page.locator("#priceTrend").is_visible())
                 self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth"), 360)
+
+    # ----- trend ranges -----
+
+    def test_ranges_show_the_right_number_of_points(self):
+        history = self.long_history(datetime.date(2026, 4, 8), datetime.date(2026, 10, 14))
+        page = self.open(history=history)
+        count = lambda: len(page.get_attribute("#trendChart .trend-line", "points").split())
+        self.assertTrue(page.is_checked('input[name="trendRange"][value="30d"]'))
+        self.assertEqual(count(), 30)
+        self.pick_range(page, "5d")
+        self.assertEqual(count(), 5)
+        self.pick_range(page, "1y")
+        self.assertEqual(count(), len(history))
+
+    def test_text_follows_the_range(self):
+        history = self.long_history(datetime.date(2026, 4, 8), datetime.date(2026, 10, 14))
+        page = self.open(history=history)
+        self.pick_range(page, "5d")
+        self.assertEqual(self.text("trendText"),
+                         "National average %.3f EUR/l. Up 0.4 ct since 8 Oct." % history[-1]["petrol95"])
+
+    def test_one_year_says_when_the_data_starts(self):
+        history = self.long_history(datetime.date(2026, 4, 8), datetime.date(2026, 10, 14))
+        page = self.open(history=history)
+        self.assertNotIn("Data starts", self.text("trendText"))
+        self.pick_range(page, "1y")
+        self.assertIn("Data starts 8 Apr 2026.", self.text("trendText"))
+
+    def test_one_year_stops_at_twelve_months(self):
+        history = self.long_history(datetime.date(2025, 1, 1), datetime.date(2026, 10, 14))
+        page = self.open(history=history)
+        self.pick_range(page, "1y")
+        self.assertNotIn("Data starts", self.text("trendText"))
+        kept = [h for h in history if h["date"] >= "2025-10-14"]
+        self.assertEqual(len(page.get_attribute("#trendChart .trend-line", "points").split()), len(kept))
+
+    def test_range_is_remembered(self):
+        page = self.open(history=self.TREND)
+        self.pick_range(page, "5d")
+        page.reload()
+        page.wait_for_selector("#priceTrend:not([hidden])")
+        self.assertTrue(page.is_checked('input[name="trendRange"][value="5d"]'))
+        self.assertEqual(len(page.get_attribute("#trendChart .trend-line", "points").split()), 5)
+
+    def test_axes_label_time_and_price(self):
+        history = self.long_history(datetime.date(2026, 4, 8), datetime.date(2026, 10, 14))
+        page = self.open(history=history)
+        self.pick_range(page, "1y")
+        months = page.locator("#trendChart .trend-xtick").all_text_contents()
+        for month in ("May", "Jul", "Oct"):
+            self.assertIn(month, months)
+        prices = page.locator("#trendChart .trend-ytick").all_text_contents()
+        self.assertIn("%.3f" % history[0]["petrol95"], prices)
+        self.assertIn("%.3f" % history[-1]["petrol95"], prices)
+        self.pick_range(page, "5d")
+        days = page.locator("#trendChart .trend-xtick").all_text_contents()
+        self.assertIn("14 Oct", days)
+
+    # ----- trend hover, touch and keyboard -----
+
+    def test_hover_shows_the_date_price_and_change(self):
+        page = self.open(history=self.TREND)
+        self.assertTrue(page.locator("#trendTip").is_hidden())
+        page.mouse.move(*self.point_xy(page, 3))
+        self.assertTrue(page.locator("#trendTip").is_visible())
+        tip = self.text("trendTip")
+        self.assertIn("8 Oct 2026", tip)
+        self.assertIn("1.960 EUR/l", tip)
+        self.assertIn("+2.9 ct", tip)
+        self.assertTrue(page.locator("#trendChart .trend-cursor").is_visible())
+        page.mouse.move(5, 5)
+        self.assertTrue(page.locator("#trendTip").is_hidden())
+        self.assertEqual(page.locator("#trendChart .trend-cursor").count(), 0)
+
+    def test_tip_does_not_cover_the_chart(self):
+        for width in (1280, 360):
+            with self.subTest(width=width):
+                page = self.open(width=width, history=self.TREND)
+                page.mouse.move(*self.point_xy(page, 3))
+                tip = page.locator("#trendTip").bounding_box()
+                chart = page.locator("#trendChart").bounding_box()
+                self.assertLessEqual(tip["y"] + tip["height"], chart["y"])
+
+    def test_date_labels_do_not_overlap(self):
+        history = self.long_history(datetime.date(2026, 4, 8), datetime.date(2026, 10, 14))
+        for width in (1280, 360):
+            for rng in ("5d", "30d", "1y"):
+                with self.subTest(width=width, range=rng):
+                    page = self.open(width=width, history=history)
+                    self.pick_range(page, rng)
+                    boxes = page.evaluate("""[...document.querySelectorAll('#trendChart .trend-xtick')]
+                        .map((t) => { const r = t.getBoundingClientRect(); return [r.left, r.right]; })""")
+                    self.assertGreaterEqual(len(boxes), 2)
+                    for (_, right), (left, _) in zip(boxes, boxes[1:]):
+                        self.assertLess(right, left)
+
+    def test_hover_on_the_first_point_has_no_change(self):
+        page = self.open(history=self.TREND)
+        page.mouse.move(*self.point_xy(page, 0))
+        self.assertIn("Start of this range", self.text("trendTip"))
+
+    def test_hover_shows_the_month_on_the_year_chart(self):
+        history = self.long_history(datetime.date(2026, 4, 8), datetime.date(2026, 10, 14))
+        page = self.open(history=history)
+        self.pick_range(page, "1y")
+        page.mouse.move(*self.point_xy(page, 40))
+        day = datetime.date.fromisoformat(history[40]["date"])
+        self.assertIn(day.strftime("%b %Y"), self.text("trendTip"))
+
+    def test_tip_stays_inside_the_screen_on_a_phone(self):
+        ctx_page = self.open(width=360, history=self.TREND)
+        for index in (0, len(self.TREND) - 1):
+            with self.subTest(index=index):
+                ctx_page.locator("#trendChart").scroll_into_view_if_needed()
+                ctx_page.mouse.move(*self.point_xy(ctx_page, index))
+                box = ctx_page.locator("#trendTip").bounding_box()
+                self.assertGreaterEqual(box["x"], 0)
+                self.assertLessEqual(box["x"] + box["width"], 360)
+
+    def test_touch_shows_the_tip(self):
+        self.tile_urls = []
+        self.history = list(self.TREND)
+        ctx = self.browser.new_context(viewport={"width": 390, "height": 844}, has_touch=True, locale="en-GB")
+        self.contexts.append(ctx)
+        ctx.route(re.compile(r"/config\.js(\?.*)?$"), lambda r: self._config(r, None))
+        ctx.route(re.compile(r"/prices\.js(\?.*)?$"), lambda r: self._prices(r, "fixture"))
+        ctx.route(re.compile(r"^https://(tile\.openstreetmap\.org|[^/]*basemaps\.cartocdn\.com)/"), self._tile)
+        page = ctx.new_page()
+        self.page = page
+        page.goto(self.base + "/" + PAGE)
+        page.wait_for_selector("#priceTrend:not([hidden])")
+        page.locator("#trendChart").scroll_into_view_if_needed()
+        page.touchscreen.tap(*self.point_xy(page, 3))
+        self.assertIn("8 Oct 2026", self.text("trendTip"))
+
+    def test_keyboard_moves_through_the_points(self):
+        page = self.open(history=self.TREND)
+        page.focus("#trendChart")
+        self.assertIn("14 Oct 2026", self.text("trendTip"))
+        page.keyboard.press("ArrowLeft")
+        self.assertIn("13 Oct 2026", self.text("trendTip"))
+        page.keyboard.press("Home")
+        self.assertIn("5 Oct 2026", self.text("trendTip"))
+        page.keyboard.press("ArrowLeft")
+        self.assertIn("5 Oct 2026", self.text("trendTip"))
+        page.keyboard.press("End")
+        self.assertIn("14 Oct 2026", self.text("trendTip"))
+        page.keyboard.press("Escape")
+        self.assertTrue(page.locator("#trendTip").is_hidden())
+
+    def test_changing_range_clears_the_tip(self):
+        page = self.open(history=self.TREND)
+        page.mouse.move(*self.point_xy(page, 3))
+        self.pick_range(page, "5d")
+        self.assertTrue(page.locator("#trendTip").is_hidden())
 
     # ----- theme -----
 
