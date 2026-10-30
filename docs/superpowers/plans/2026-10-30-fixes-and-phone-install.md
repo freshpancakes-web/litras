@@ -276,7 +276,7 @@ Commit with message `feat: install on a phone and open offline`.
 ## After the tasks (the controller asks the user first; not subagent work)
 
 1. Final whole-branch review, then push the branch and open a pull request. The tests run on it.
-2. On the user's OK, merge. On the Mac, update the main checkout: `git checkout -- prices.js && git pull --ff-only`.
+2. On the user's OK, merge. On the Mac, update the main checkout: `git checkout -- prices.js && git checkout main && git pull --ff-only`.
 3. On the user's OK, reinstall the Mac job with `bash schedule_prices.sh`, then run `launchctl start com.fuelcalculator.updateprices` and read the log to confirm `gh` works under launchd. If it can't reach the keychain, the job still pulls, and this is reported to the user.
 4. Check the live site: `sw.js` and the manifest return 200, and `config.js` returns 404.
 5. The user tries the install on their own phone. Nobody else can verify real iPhone or Android install, so don't claim it works before they confirm.
