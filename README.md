@@ -26,3 +26,15 @@ Everything you enter stays in your browser (`localStorage`).
 
 ## Data and credits
 Fuel prices: Lithuanian Energy Agency (LEA) and the companies that operate the stations, collected at about 10:00 on working days. Map data © OpenStreetMap contributors, map tiles © CARTO, address search by Photon (komoot), routes by OSRM or, with your own key, OpenRouteService.
+
+## Running the tests
+The browser tests use Python 3 and Playwright. They serve the page locally and mock the address, routing and map-tile services, so they need no keys; Leaflet and the fonts still load from their CDNs.
+
+```
+python3 -m venv .venv
+.venv/bin/pip install -r tests/requirements.txt
+.venv/bin/python -m playwright install chromium
+.venv/bin/python -m unittest discover -s tests -v
+```
+
+To use the Chrome you already have instead of downloading Chromium, skip the `playwright install` line and set `FC_BROWSER_CHANNEL=chrome` before the last command. The same tests run on GitHub for every pull request and push to `main`.
