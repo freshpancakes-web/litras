@@ -8,3 +8,7 @@ fuel-calculator.before-redesign.html
 brag-output*/
 __pycache__/
 .DS_Store
+
+# Local only
+.venv/
+.taste/

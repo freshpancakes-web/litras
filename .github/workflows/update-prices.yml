@@ -1,13 +1,22 @@
 # Refreshes prices.js from the Lithuanian Energy Agency (LEA) file on weekdays and commits it when the
-# price date changes. Times are UTC: 08:30 and 13:00 are 10:30 and 15:00 in Vilnius in winter
-# (11:30 and 16:00 in summer). LEA collects prices at about 10:00 on working days.
+# price date moves forward. LEA collects prices at about 10:00 on working days.
+# Cron times are UTC: 09:00, 10:30, 12:00 and 14:30 are 11:00, 12:30, 14:00 and 16:30 in Vilnius in
+# winter (12:00, 13:30, 15:00 and 17:30 in summer).
+# GitHub can start scheduled runs hours late. The Mac's trigger (update_from_github.sh, which runs
+# this workflow with workflow_dispatch) is the fast path; the schedule is the fallback.
 name: Update fuel prices
 
 on:
   schedule:
-    - cron: "30 8 * * 1-5"
-    - cron: "0 13 * * 1-5"
+    - cron: "0 9 * * 1-5"
+    - cron: "30 10 * * 1-5"
+    - cron: "0 12 * * 1-5"
+    - cron: "30 14 * * 1-5"
   workflow_dispatch:
+
+concurrency:
+  group: update-prices
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -20,14 +29,16 @@ jobs:
 
       - name: Build prices.js
         run: |
-          before=$(grep -o '"date":"[0-9-]*"' prices.js | head -1)
+          before=$(grep -o '"date":"[0-9-]*"' prices.js | head -1 | cut -d'"' -f4)
           python3 update_prices.py
-          after=$(grep -o '"date":"[0-9-]*"' prices.js | head -1)
+          after=$(grep -o '"date":"[0-9-]*"' prices.js | head -1 | cut -d'"' -f4)
           echo "before=$before after=$after"
-          if [ "$before" = "$after" ]; then
-            echo "No new price date yet, nothing to commit."
+          # Only keep the new file when its date is later, so an older file never replaces a newer one.
+          if [[ ! "$after" > "$before" ]]; then
+            echo "No newer price date yet, nothing to commit."
             git checkout -- prices.js
           fi
+        shell: bash
 
       - name: Commit new prices
         run: |
@@ -36,4 +47,5 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add prices.js
           git commit -m "Update fuel prices to $(grep -o '"date":"[0-9-]*"' prices.js | head -1 | cut -d'"' -f4)"
+          git pull --rebase origin main
           git push
