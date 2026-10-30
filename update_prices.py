@@ -5,17 +5,21 @@ Usage:
     python3 update_prices.py                 download the LEA Excel file, write prices.js next to this script
     python3 update_prices.py FILE.xlsx       use a file you already downloaded
     python3 update_prices.py FILE.xlsx OUT   also choose where prices.js is written
+    python3 update_prices.py --check-fresh   exit 1 if prices.js is more than 7 days old
 
 Needs only Python 3.8+ (standard library). Source: LEA (Lietuvos energetikos agentūra) and the companies
 that operate the stations. Prices are collected every working day around 10:00.
 """
 import datetime as dt
+import glob
+import html.parser
 import http.cookiejar
 import json
 import os
 import re
 import sys
 import tempfile
+import urllib.parse
 import urllib.request
 import zipfile
 import xml.etree.ElementTree as ET
@@ -23,7 +27,8 @@ from collections import defaultdict
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 XLSX_URL = "https://ltenergagen.sharepoint.com/:x:/s/intra/doc/IQBfrNG1U7XYR5LAZBxiytLDARSs2Dah4n5ehD0IaSg0dUs?e=7t6GjA"
-LOCAL_XLSX = os.path.join(HERE, "DK-2026.xlsx")
+LEA_PAGE = "https://www.ena.lt/dk-pr-pr-duomenys/"
+LEA_FILE_HOST = "ltenergagen.sharepoint.com"
 DEFAULT_OUT = os.path.join(HERE, "prices.js")
 
 NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
@@ -31,6 +36,7 @@ FUELS = {"95 benzinas": "petrol95", "Dyzelinas": "diesel", "SND": "lpg"}
 MIN_PRICE, MAX_PRICE = 0.3, 5.0          # EUR/l, anything outside is treated as a typing error
 MIN_STATIONS_PER_NETWORK = 5
 HISTORY_DAYS = 30
+MAX_AGE_DAYS = 7                         # long enough for Christmas and New Year without new prices
 
 
 def log(msg):
@@ -54,6 +60,104 @@ def download(url, dest):
             if not chunk:
                 break
             out.write(chunk)
+
+
+class _Links(html.parser.HTMLParser):
+    """Collects (href, title and link text) for every link on a page."""
+
+    def __init__(self):
+        super().__init__()
+        self.links = []
+        self._open = None
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "a":
+            attrs = dict(attrs)
+            self._open = [attrs.get("href") or "", attrs.get("title") or ""]
+            self.links.append(self._open)
+
+    def handle_data(self, data):
+        if self._open:
+            self._open[1] += " " + data
+
+    def handle_endtag(self, tag):
+        if tag == "a":
+            self._open = None
+
+
+def find_xlsx_url(page_html):
+    """The link to LEA's newest "YYYY m. degalų kainos" file on LEA's own file host, or None."""
+    parser = _Links()
+    parser.feed(page_html)
+    best_year, best_url = 0, None
+    for href, label in parser.links:
+        match = re.search(r"(\d{4})\s*m\.?\s*degal\w*\s+kain", label, re.IGNORECASE)
+        url = urllib.parse.urlparse(href)
+        if match and url.scheme == "https" and url.hostname == LEA_FILE_HOST and int(match.group(1)) > best_year:
+            best_year, best_url = int(match.group(1)), href
+    return best_url
+
+
+def fetch_page(url):
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return resp.read().decode("utf-8", "replace")
+
+
+def current_xlsx_url():
+    """Asks LEA's page for the current file, so a new year's link is picked up without a code change."""
+    try:
+        url = find_xlsx_url(fetch_page(LEA_PAGE))
+        if url:
+            return url
+        log("No price file link found on %s, using the known link." % LEA_PAGE)
+    except Exception as e:
+        log("Could not read %s (%s), using the known link." % (LEA_PAGE, e))
+    return XLSX_URL
+
+
+def newest_local_xlsx(folder=HERE):
+    files = sorted(glob.glob(os.path.join(folder, "DK-*.xlsx")))
+    return files[-1] if files else None
+
+
+# ---------- History and freshness ----------
+
+def read_prices_js(path):
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    return json.loads(text[text.index("{"):text.rindex("}") + 1])
+
+
+def read_history(path):
+    try:
+        history = read_prices_js(path).get("history")
+    except (OSError, ValueError):
+        return []
+    return history if isinstance(history, list) else []
+
+
+def merge_history(new, old, latest):
+    """New days win over old ones. Old days keep the trend going when LEA starts a new file in January."""
+    days = {p["date"]: p for p in old if p.get("date") and p["date"] <= latest}
+    days.update((p["date"], p) for p in new)
+    return [days[d] for d in sorted(days)][-HISTORY_DAYS:]
+
+
+def check_fresh(path, today=None):
+    """Returns 1 when prices.js is stale, so the GitHub job fails and GitHub sends an email."""
+    today = today or dt.datetime.now(dt.timezone.utc).date()
+    try:
+        date = dt.date.fromisoformat(read_prices_js(path)["date"])
+    except (OSError, ValueError, KeyError):
+        log("Could not read the price date from %s." % path)
+        return 1
+    age = (today - date).days
+    if age > MAX_AGE_DAYS:
+        log("Prices are %d days old (%s). LEA may have moved to a new file: check %s." % (age, date, LEA_PAGE))
+        return 1
+    log("Prices are %d days old (%s)." % (age, date))
+    return 0
 
 
 # ---------- Reading the Excel file (standard library only) ----------
@@ -170,6 +274,9 @@ def build(rows):
             vals = per_day[day][f]
             point[f] = round(sum(vals) / len(vals), 3) if vals else None
         history.append(point)
+    # The newest point uses the same de-duplicated station average the page shows as "Average".
+    for f in FUELS.values():
+        history[-1][f] = national[f]["avg"] if national[f] else None
 
     return {
         "date": latest.isoformat(),
@@ -192,6 +299,8 @@ def write_js(data, out_path):
 
 
 def main():
+    if sys.argv[1:] == ["--check-fresh"]:
+        return check_fresh(DEFAULT_OUT)
     xlsx = sys.argv[1] if len(sys.argv) > 1 else None
     out = sys.argv[2] if len(sys.argv) > 2 else DEFAULT_OUT
     tmp_file = None
@@ -200,19 +309,21 @@ def main():
             tmp_file = os.path.join(tempfile.gettempdir(), "lea-fuel-prices.xlsx")
             try:
                 log("Downloading the LEA price file...")
-                download(XLSX_URL, tmp_file)
+                download(current_xlsx_url(), tmp_file)
                 xlsx = tmp_file
             except Exception as e:
                 log("Download failed: %s" % e)
-                if os.path.exists(LOCAL_XLSX):
-                    log("Using the file next to this script instead: %s" % LOCAL_XLSX)
-                    xlsx = LOCAL_XLSX
+                local = newest_local_xlsx()
+                if local:
+                    log("Using the file next to this script instead: %s" % local)
+                    xlsx = local
                 else:
-                    log("Download the Excel file by hand from https://www.ena.lt/dk-pr-pr-duomenys/, save it as "
-                        "DK-2026.xlsx next to this script and run it again.")
+                    log("Download the Excel file by hand from %s, save it as DK-<year>.xlsx next to this script "
+                        "and run it again." % LEA_PAGE)
                     return 1
         log("Reading %s ..." % xlsx)
         data = build(parse(xlsx))
+        data["history"] = merge_history(data["history"], read_history(out), data["date"])
         write_js(data, out)
         n = data["national"]
         log("Wrote %s" % out)
