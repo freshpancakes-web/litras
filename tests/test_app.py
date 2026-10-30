@@ -261,6 +261,30 @@ class AppTest(unittest.TestCase):
         self.assertEqual(self.value("perWeek"), "5")
         self.assertTrue(page.is_checked("#roundTrip"))
 
+    # ----- name and logo -----
+
+    def test_page_shows_the_name_and_logo(self):
+        page = self.open()
+        self.assertEqual(page.title(), "Litras: trip fuel calculator")
+        self.assertEqual(page.inner_text("h1"), "Litras")
+        self.assertIn("Fuel use and cost", page.inner_text("header"))
+        self.assertGreater(page.evaluate("document.querySelector('header img').naturalWidth"), 0)
+        self.assertEqual(page.get_attribute("header img", "alt"), "")
+        self.assertEqual(page.get_attribute('link[rel="icon"]', "href"), "icons/icon.svg")
+
+    def test_old_name_is_gone_from_what_people_see(self):
+        for name in ("index.html", "manifest.webmanifest", "README.md", "fuel-calculator.html"):
+            with open(os.path.join(ROOT, name), encoding="utf-8") as f:
+                self.assertNotIn("trip fuel calculator</", f.read().lower().replace("litras: trip fuel calculator</", ""), name)
+
+    def test_icons_are_the_right_size_and_home_screen_icon_has_no_transparency(self):
+        for name, size, color_type in (("icon-180.png", 180, 2), ("icon-192.png", 192, 6),
+                                       ("icon-512.png", 512, 6), ("icon-maskable-512.png", 512, 2)):
+            with self.subTest(name), open(os.path.join(ROOT, "icons", name), "rb") as f:
+                head = f.read(26)
+                self.assertEqual(int.from_bytes(head[16:20], "big"), size)
+                self.assertEqual(head[25], color_type)   # 2 = no alpha, 6 = alpha
+
     # ----- empty start and current location -----
 
     def wait_location(self, page, expected):

@@ -1,8 +1,8 @@
-# Trip Fuel Calculator
+# Litras
 
 A single page that works out the fuel use and cost of a car trip in Lithuania. It routes the trip on a map, applies the car's consumption, and prices the fuel with the latest station prices from the Lithuanian Energy Agency (LEA).
 
-Open it: **https://freshpancakes-web.github.io/special-palm-tree/**
+Open it: **https://freshpancakes-web.github.io/litras/**
 
 ## What it does
 - A list of cars with City, Mixed and Highway consumption you can edit, plus your own cars

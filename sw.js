@@ -1,11 +1,11 @@
-// Service worker for the Trip Fuel Calculator. Lets the page open offline.
+// Service worker for Litras. Lets the page open offline.
 // Change CACHE_NAME in a release to replace the cached shell.
 // All paths are relative to this file, because the site lives under a sub-path.
-const CACHE_NAME = "fc-v1";
+const CACHE_NAME = "fc-v2";
 const NETWORK_TIMEOUT_MS = 3000;
 
 const SHELL = ["./", "./fuel-calculator.html", "./prices.js", "./manifest.webmanifest",
-  "./icons/icon-180.png", "./icons/icon-192.png", "./icons/icon-512.png", "./icons/icon-maskable-512.png"];
+  "./icons/icon.svg", "./icons/icon-180.png", "./icons/icon-192.png", "./icons/icon-512.png", "./icons/icon-maskable-512.png"];
 const LEAFLET = [
   "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js",
   "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"
