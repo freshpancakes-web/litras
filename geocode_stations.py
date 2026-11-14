@@ -3,6 +3,7 @@
 Photon finds a building for the address; Nominatim then confirms the position lies in the
 station's municipality. Positions are cached in station-coords.json so each address is looked up once."""
 import datetime
+import http.client
 import json
 import re
 import time
@@ -114,7 +115,7 @@ def update_cache(stations, cache, today, get, sleep=time.sleep, limit=MAX_LOOKUP
         attempts += 1
         try:
             position = lookup(address, s["m"], get, sleep)
-        except (OSError, ValueError, KeyError, IndexError, TypeError):
+        except (OSError, http.client.HTTPException, ValueError, KeyError, IndexError, TypeError):
             skipped += 1
             continue
         looked_up += 1

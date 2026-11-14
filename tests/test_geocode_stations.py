@@ -1,5 +1,6 @@
 """Tests for geocode_stations.py. A fake `get` and `sleep` are injected: no network is used."""
 import datetime as dt
+import http.client
 import json
 import os
 import sys
@@ -141,6 +142,13 @@ class UpdateCacheTests(unittest.TestCase):
     def test_service_errors_count_as_skipped_not_cached(self):
         cache = {}
         get = FakeGet({"photon": OSError("down")})
+        result = gs.update_cache(stations(ADDR), cache, TODAY, get, nosleep)
+        self.assertEqual(cache, {})
+        self.assertEqual(result, {"looked_up": 0, "found": 0, "skipped": 1})
+
+    def test_http_exceptions_count_as_skipped_not_cached(self):
+        cache = {}
+        get = FakeGet({"photon": http.client.IncompleteRead(b"")})
         result = gs.update_cache(stations(ADDR), cache, TODAY, get, nosleep)
         self.assertEqual(cache, {})
         self.assertEqual(result, {"looked_up": 0, "found": 0, "skipped": 1})
