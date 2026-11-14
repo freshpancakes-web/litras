@@ -8,12 +8,12 @@ Open it: **https://freshpancakes-web.github.io/litras/**
 - A list of cars with City, Mixed and Highway consumption you can edit, plus your own cars
 - Your current location as the starting point (the browser asks first), with a "Use my location" button
 - From and To with address suggestions, up to 8 stops, the route on a map, and a cost for each leg
-- Station prices by network and municipality (average or cheapest), the 8 cheapest stations, and a 5-day, 30-day and 1-year chart of the national average
+- Station prices by network and municipality (average or cheapest), starting with the municipality you are in, the 8 cheapest stations, and a 5-day, 30-day and 1-year chart of the national average
 - Trips per week and saved trips, with a weekly and monthly cost
 - Measuring consumption from a fill-up
 - Light and dark mode
 
-Everything you enter stays in your browser (`localStorage`). Your location is only sent to the address and routing services, the same as a typed address, and is only kept if you save a trip.
+Everything you enter stays in your browser (`localStorage`). Your location is only sent to the address and routing services, the same as a typed address, and, rounded to about 100 m, to OpenStreetMap's Nominatim to find your municipality. The page keeps only the name of that municipality, plus the From place of any trip you save.
 
 ## Install on your phone
 - iPhone: open the page in Safari, tap Share, then Add to Home Screen.
@@ -41,7 +41,7 @@ GitHub Actions builds `prices.js` and commits it; the hosted page serves that fi
 The hosted page therefore gets the day's prices at about 10:45 only when the Mac is awake then. Otherwise it gets them when GitHub's schedule runs, which may be later.
 
 ## Data and credits
-Fuel prices: Lithuanian Energy Agency (LEA) and the companies that operate the stations, collected at about 10:00 on working days. Map data © OpenStreetMap contributors, map tiles © CARTO, address search by Photon (komoot), routes by OSRM or, with your own key, OpenRouteService.
+Fuel prices: Lithuanian Energy Agency (LEA) and the companies that operate the stations, collected at about 10:00 on working days. Map data © OpenStreetMap contributors, map tiles © CARTO, address search by Photon (komoot), municipality lookup by Nominatim (OpenStreetMap), routes by OSRM or, with your own key, OpenRouteService.
 
 ## Running the tests
 The browser tests use Python 3 and Playwright. They serve the page locally and mock the address, routing and map-tile services, so they need no keys; Leaflet and the fonts still load from their CDNs.

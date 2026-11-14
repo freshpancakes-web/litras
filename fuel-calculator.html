@@ -164,7 +164,7 @@ details[open] summary { margin-bottom: 14px; }
 /* Trip: stops and legs */
 .route { display: flex; flex-direction: column; gap: 12px; }
 button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size: 13px; }
-#locMsg[hidden] { display: none; }
+#locMsg[hidden], #muniNote[hidden] { display: none; }
 .stoprow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }
 .stoprow .x { width: 42px; padding: 0; font-size: 20px; line-height: 1; color: var(--muted); }
 .stoprow .x:hover { color: var(--danger); border-color: var(--danger); }
@@ -439,6 +439,7 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
         <label for="priceNetwork">Station network <select id="priceNetwork"></select></label>
         <label for="priceMuni">Municipality <select id="priceMuni"></select></label>
       </div>
+      <div class="hint" id="muniNote" role="status" hidden></div>
       <div class="seg seg2" role="radiogroup" aria-label="Price basis">
         <label><input type="radio" name="basis" value="avg" checked><span>Average price</span></label>
         <label><input type="radio" name="basis" value="min"><span>Cheapest station</span></label>
@@ -484,7 +485,7 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
 
   </main>
 
-  <footer class="foot">Map data &copy; OpenStreetMap contributors, tiles &copy; CARTO. Fuel prices: Lithuanian Energy Agency (LEA) and the companies operating the stations. Address search by Photon, routes by OSRM or OpenRouteService.</footer>
+  <footer class="foot">Map data &copy; OpenStreetMap contributors, tiles &copy; CARTO. Fuel prices: Lithuanian Energy Agency (LEA) and the companies operating the stations. Address search by Photon, municipality lookup by Nominatim (OpenStreetMap), routes by OSRM or OpenRouteService.</footer>
 </div>
 
 <div class="minibar" id="minibar" aria-hidden="true">
@@ -531,6 +532,21 @@ let cars = store.get("fc.cars") || DEFAULT_CARS.map((c) => JSON.parse(JSON.strin
 let carId = store.get("fc.carId") || cars[0].id;
 let lea = null;   // window.FUEL_PRICES, when prices.js is present
 let priceDirty = false;
+
+// "My location" in the municipality filter. myMuni is the LEA name of the municipality you are in, kept
+// in fc.lastMuni so it also works offline. It is the only location detail the page stores.
+const MUNI_AUTO = "@me";
+const MUNI_NOTES = {
+  blocked: "Location is off, so all municipalities are shown. Press Use my location to turn it on, or pick a municipality.",
+  outside: "Your location isn't in a Lithuanian municipality with stations in this list, so all municipalities are shown.",
+  failed: "Your municipality could not be found, so all municipalities are shown."
+};
+let leaMunis = [];
+let myMuni = store.get("fc.locationDenied") ? null : store.get("fc.lastMuni");
+if (typeof myMuni !== "string") myMuni = null;
+let myMuniState = store.get("fc.locationDenied") ? "blocked" : myMuni ? "found" : "pending";
+// Once, when this default arrives: a municipality saved earlier gives way to "My location".
+if (!store.get("fc.nearMe")) { store.set("fc.priceMuni", MUNI_AUTO); store.set("fc.nearMe", true); }
 let lastMeasured = null;
 
 const car = () => cars.find((c) => c.id === carId) || cars[0];
@@ -614,16 +630,19 @@ function loadLea() {
   const net = $("priceNetwork"), muni = $("priceMuni");
   net.innerHTML = ""; muni.innerHTML = "";
   net.appendChild(new Option("All networks", ""));
+  muni.appendChild(new Option(myLocationLabel(), MUNI_AUTO));
   muni.appendChild(new Option("All municipalities", ""));
+  leaMunis = [];
   if (lea) {
     const counts = {};
     lea.stations.forEach((s) => { counts[s.c] = (counts[s.c] || 0) + 1; });
     Object.keys(counts).sort((a, b) => counts[b] - counts[a] || a.localeCompare(b))
       .forEach((n) => net.appendChild(new Option(n + " (" + counts[n] + ")", n)));
-    Array.from(new Set(lea.stations.map((s) => s.m).filter(Boolean))).sort((a, b) => a.localeCompare(b, "lt"))
-      .forEach((m) => muni.appendChild(new Option(m, m)));
+    leaMunis = Array.from(new Set(lea.stations.map((s) => s.m).filter(Boolean))).sort((a, b) => a.localeCompare(b, "lt"));
+    leaMunis.forEach((m) => muni.appendChild(new Option(m, m)));
     net.value = store.get("fc.priceNet") || "";
-    muni.value = store.get("fc.priceMuni") || "";
+    const savedMuni = store.get("fc.priceMuni");
+    muni.value = savedMuni == null ? MUNI_AUTO : savedMuni;
     if (net.selectedIndex < 0) net.value = "";
     if (muni.selectedIndex < 0) muni.value = "";
   }
@@ -800,17 +819,64 @@ function wireTrend() {
   if (pick) pick.checked = true;
 }
 
+/* ----- My location in the municipality filter ----- */
+
+// The name comes first so it stays readable when a narrow phone cuts the label short.
+const myLocationLabel = () => myMuni ? myMuni + " (my location)" : "My location";
+
+// "Kauno rajono savivaldybė" (OpenStreetMap) -> "Kauno r. sav." (LEA)
+function leaMunicipality(name) {
+  return name.trim().replace(/\s+miesto savivaldybė$/i, " m. sav.").replace(/\s+rajono savivaldybė$/i, " r. sav.")
+    .replace(/\s+savivaldybė$/i, " sav.");
+}
+
+// Coordinates are rounded to about 100 m: enough to tell the municipality, less than an address.
+const municipalityUrl = (lat, lng) => "https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=8&accept-language=lt" +
+  "&lat=" + lat.toFixed(3) + "&lon=" + lng.toFixed(3);
+
+function setMyMunicipality(name, state) {
+  myMuni = name;
+  myMuniState = state;
+  if (name) store.set("fc.lastMuni", name);
+  else if (state === "outside" && store.get("fc.lastMuni")) store.set("fc.lastMuni", null);
+  const option = $("priceMuni").options[0];
+  if (option) option.textContent = myLocationLabel();
+  if ($("priceMuni").value === MUNI_AUTO) applyPriceToInput();
+}
+
+async function findMyMunicipality(lat, lng) {
+  try {
+    const res = await fetch(municipalityUrl(lat, lng), { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) throw new Error("Municipality lookup failed (HTTP " + res.status + ").");
+    const a = (await res.json()).address || {};
+    const name = a.country_code === "lt" ? leaMunicipality(a.state_district || a.municipality || "") : "";
+    setMyMunicipality(name || null, name ? "found" : "outside");
+  } catch (e) {
+    if (!myMuni) setMyMunicipality(null, "failed");   // offline: the last municipality stays
+  }
+}
+
 function applyPriceToInput() {
   renderTrend();
   const c = car();
   const note = $("priceNote"), state = $("priceState");
-  let value = null;
+  let value = null, muniMsg = "";
   $("stationList").innerHTML = "";
   $("stationsSummary").textContent = "Cheapest stations";
 
   if (lea) {
-    const field = FIELD[c.fuel], net = $("priceNetwork").value, muni = $("priceMuni").value;
-    const rows = lea.stations.filter((s) => s[field] != null && (!net || s.c === net) && (!muni || s.m === muni));
+    const field = FIELD[c.fuel], net = $("priceNetwork").value, auto = $("priceMuni").value === MUNI_AUTO;
+    const inMuni = (m) => lea.stations.filter((s) => s[field] != null && (!net || s.c === net) && (!m || s.m === m));
+    let muni = $("priceMuni").value;
+    if (auto) {
+      muni = myMuni && leaMunis.includes(myMuni) ? myMuni : "";
+      if (!muni) muniMsg = (myMuni ? MUNI_NOTES.outside : MUNI_NOTES[myMuniState]) || "";
+    }
+    let rows = inMuni(muni);
+    if (auto && muni && !rows.length) {
+      muniMsg = "No station in " + muni + " matches, so all municipalities are shown.";
+      rows = inMuni("");
+    }
     const age = daysOld(lea.date);
     state.textContent = "LEA " + fmtDate(lea.date);
     state.classList.toggle("live", age <= 3);
@@ -835,6 +901,8 @@ function applyPriceToInput() {
       (value == null ? " (it has no LPG price, type one in)" : "") + "." +
       (ON_WEB ? "" : " Run update_prices.py to get daily station prices.");
   }
+  $("muniNote").textContent = muniMsg;
+  $("muniNote").hidden = !muniMsg;
   if (!priceDirty) $("price").value = value != null ? Math.round(value * 1000) / 1000 : "";
   calc();
 }
@@ -1044,19 +1112,22 @@ async function reverseLookup(lat, lng) {
 function locationMessage(text) { const m = $("locMsg"); m.textContent = text; m.hidden = !text; }
 
 // asked = the Use my location button. On opening the app (asked = false) a refusal stays quiet.
-function useMyLocation(asked) {
+// fillFrom = also put the location in From; the municipality filter asks without it.
+function useMyLocation(asked, fillFrom) {
   const input = $("origin"), btn = $("useLocation"), startValue = input.value;
-  const stillWanted = () => input.value === startValue;
+  const stillWanted = () => fillFrom && input.value === startValue;
   if (!navigator.geolocation) {
     if (asked) locationMessage("This browser can't share your location. Type your address instead.");
+    if (!myMuni) setMyMunicipality(null, "failed");
     return;
   }
-  locationMessage("");
+  if (fillFrom) locationMessage("");
   btn.disabled = asked;
   navigator.geolocation.getCurrentPosition(async (pos) => {
-    if (!stillWanted()) { btn.disabled = false; return; }
     store.set("fc.locationDenied", null);
     const lat = pos.coords.latitude, lng = pos.coords.longitude;
+    findMyMunicipality(lat, lng);
+    if (!stillWanted()) { btn.disabled = false; return; }
     let label = LOCATION_LABEL;
     try { label = await reverseLookup(lat, lng); } catch (e) { /* the coordinates are enough to route */ }
     btn.disabled = false;
@@ -1066,7 +1137,8 @@ function useMyLocation(asked) {
     placesChanged();
   }, (err) => {
     btn.disabled = false;
-    if (err.code === 1) store.set("fc.locationDenied", true);
+    if (err.code === 1) { store.set("fc.locationDenied", true); setMyMunicipality(null, "blocked"); }
+    else if (!myMuni) setMyMunicipality(null, "failed");
     if (asked) locationMessage(err.code === 1
       ? "Location is blocked. Allow it for this site in your browser's settings, then try again."
       : "Could not find your location. Type your address instead.");
@@ -1257,6 +1329,7 @@ $("routeBtn").addEventListener("click", calculateRoute);
 ["priceNetwork", "priceMuni"].forEach((id) => $(id).addEventListener("change", (e) => {
   store.set(id === "priceNetwork" ? "fc.priceNet" : "fc.priceMuni", e.target.value);
   priceDirty = false; applyPriceToInput();
+  if (id === "priceMuni" && e.target.value === MUNI_AUTO && myMuniState !== "found") useMyLocation(false, false);
 }));
 document.querySelectorAll('input[name="basis"]').forEach((r) => r.addEventListener("change", () => {
   store.set("fc.basis", r.value); priceDirty = false; applyPriceToInput();
@@ -1466,8 +1539,8 @@ initMap();
 syncOfflineNote();
 wireSuggest($("origin"), $("originList"), places, "origin", placesChanged);
 wireSuggest($("dest"), $("destList"), places, "dest", placesChanged);
-$("useLocation").addEventListener("click", () => useMyLocation(true));
-if (!store.get("fc.locationDenied")) useMyLocation(false);
+$("useLocation").addEventListener("click", () => useMyLocation(true, true));
+if (!store.get("fc.locationDenied")) useMyLocation(false, true);
 const savedOrs = store.get("fc.orsKey");
 if (savedOrs) $("orsKey").value = savedOrs;
 $("orsKey").addEventListener("change", (e) => store.set("fc.orsKey", e.target.value.trim() || null));
