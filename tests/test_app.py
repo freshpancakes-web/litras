@@ -1075,6 +1075,34 @@ class AppTest(unittest.TestCase):
         self.assertEqual(len(self.osrm_requests), 2)
         self.assertIn("%s,%s" % (a["g"][1], a["g"][0]), self.osrm_requests[-1])
 
+    def test_double_click_on_add_as_stop_adds_one_stop(self):
+        page = self.route_with(list(self.stations_trio()))
+        page.evaluate("() => { const b = document.getElementById('rsAddRec'); b.click(); b.click(); }")
+        page.wait_for_function("document.getElementById('routeBtn').disabled === false")
+        page.wait_for_timeout(300)
+        self.assertEqual(page.locator("#stops .stoprow").count(), 1)
+        self.assertEqual(len(self.osrm_requests), 2)
+
+    def test_enter_on_a_row_moves_focus_to_the_popup_add_button(self):
+        page = self.route_with(list(self.stations_trio()))
+        page.focus("#rsList .rs-row >> nth=1")
+        page.keyboard.press("Enter")
+        page.wait_for_selector(".leaflet-popup .st-add")
+        self.assertTrue(page.evaluate("document.activeElement.classList.contains('st-add')"))
+        page.keyboard.press("Enter")
+        page.wait_for_function("document.getElementById('stop1In') && document.getElementById('stop1In').value")
+        self.assertTrue(self.value("stop1In").startswith("Viada"))
+
+    def test_removing_a_stop_hides_the_stations_section(self):
+        page = self.route_with(list(self.stations_trio()))
+        page.click("#rsAddRec")
+        page.wait_for_function("document.getElementById('stop1In') && document.getElementById('stop1In').value")
+        page.wait_for_function("document.getElementById('routeBtn').disabled === false")
+        self.assertTrue(page.locator("#routeStations").is_visible())
+        page.click("#stops .x")
+        self.assertTrue(page.locator("#routeStations").is_hidden())
+        self.assertEqual(page.locator(".st-pin").count(), 0)
+
     def test_row_click_does_not_change_the_trip(self):
         page = self.route_with(list(self.stations_trio()))
         page.click("#rsList .rs-row >> nth=0")
