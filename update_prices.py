@@ -6,6 +6,7 @@ Usage:
     python3 update_prices.py FILE.xlsx       use a file you already downloaded
     python3 update_prices.py FILE.xlsx OUT   also choose where prices.js is written
     python3 update_prices.py --check-fresh   exit 1 if prices.js is more than 7 days old
+    add --no-geocode to any of the above to skip looking up station positions (cached ones are still used)
 
 Needs only Python 3.8+ (standard library). Source: LEA (Lietuvos energetikos agentūra) and the companies
 that operate the stations. Prices are collected every working day around 10:00.
@@ -25,11 +26,14 @@ import zipfile
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 
+import geocode_stations
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 XLSX_URL = "https://ltenergagen.sharepoint.com/:x:/s/intra/doc/IQBfrNG1U7XYR5LAZBxiytLDARSs2Dah4n5ehD0IaSg0dUs?e=7t6GjA"
 LEA_PAGE = "https://www.ena.lt/dk-pr-pr-duomenys/"
 LEA_FILE_HOST = "ltenergagen.sharepoint.com"
 DEFAULT_OUT = os.path.join(HERE, "prices.js")
+COORDS_FILE = os.path.join(HERE, "station-coords.json")
 
 NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
 FUELS = {"95 benzinas": "petrol95", "Dyzelinas": "diesel", "SND": "lpg"}
@@ -298,11 +302,14 @@ def write_js(data, out_path):
     os.replace(tmp, out_path)
 
 
-def main():
-    if sys.argv[1:] == ["--check-fresh"]:
+def main(argv=None):
+    argv = list(sys.argv if argv is None else argv)
+    no_geocode = "--no-geocode" in argv
+    argv = [a for a in argv if a != "--no-geocode"]
+    if argv[1:] == ["--check-fresh"]:
         return check_fresh(DEFAULT_OUT)
-    xlsx = sys.argv[1] if len(sys.argv) > 1 else None
-    out = sys.argv[2] if len(sys.argv) > 2 else DEFAULT_OUT
+    xlsx = argv[1] if len(argv) > 1 else None
+    out = argv[2] if len(argv) > 2 else DEFAULT_OUT
     tmp_file = None
     try:
         if xlsx is None:
@@ -324,6 +331,14 @@ def main():
         log("Reading %s ..." % xlsx)
         data = build(parse(xlsx))
         data["history"] = merge_history(data["history"], read_history(out), data["date"])
+        cache = geocode_stations.load_cache(COORDS_FILE)
+        if not no_geocode:
+            result = geocode_stations.update_cache(data["stations"], cache, dt.date.today(),
+                                                   geocode_stations.http_get,
+                                                   save=lambda: geocode_stations.save_cache(COORDS_FILE, cache))
+            note = " Stopped early (%s)." % result["stopped"] if result["stopped"] else ""
+            log("Positions: %(found)d found, %(looked_up)d looked up, %(skipped)d skipped." % result + note)
+        geocode_stations.apply_positions(data["stations"], cache)
         write_js(data, out)
         n = data["national"]
         log("Wrote %s" % out)

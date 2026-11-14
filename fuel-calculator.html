@@ -227,6 +227,24 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
   .hero .fuel { text-align: left; }
 }
 
+/* Stations on your route */
+.rs[hidden], .rs-rec[hidden], .rs-empty[hidden], #rsShowAll[hidden], #rsNote[hidden] { display: none; }
+.rs { gap: 16px; }
+.rs-opts { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 12px 16px; }
+.rs-rec { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 14px 16px; border: 1px solid var(--accent); border-radius: 10px; background: var(--accent-soft); }
+.rs-rec p { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+#rsMsg:empty { display: none; }
+.rs-empty { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; font-size: 14px; color: var(--muted); }
+.rs-list { list-style: none; margin: 0; padding: 0; }
+.rs-list li + li { border-top: 1px solid var(--line); }
+.rs-row { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; width: 100%; height: auto; text-align: left; padding: 10px 8px; font-weight: 400; border: 0; border-radius: 6px; background: transparent; }
+.rs-row:hover { background: var(--accent-soft); }
+.rs-row.rec { box-shadow: inset 3px 0 0 var(--accent); }
+.rs-row .p { font-size: 15px; font-weight: 600; color: var(--accent); }
+.rs-row small { display: block; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.rs-row span { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 480px) { .rs-opts { grid-template-columns: minmax(0, 1fr); } }
+
 /* Station list */
 .stlist { list-style: none; margin: 0; padding: 0; }
 .stlist li + li { border-top: 1px solid var(--line); }
@@ -262,6 +280,19 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
 .sugg button { display: block; width: 100%; height: auto; text-align: left; border: 0; border-radius: 6px; background: transparent; padding: 9px 10px; font-weight: 400; }
 .sugg button:hover, .sugg button.active, .sugg button:focus-visible { background: var(--accent-soft); outline-offset: -2px; }
 .pin { display: flex; align-items: center; justify-content: center; background: var(--accent); color: var(--accent-ink); border: 2px solid var(--surface); border-radius: 50%; font: 600 12px/1 var(--font); box-shadow: 0 1px 5px rgba(0,0,0,.45); }
+.st-pin { display: flex; align-items: center; justify-content: center; border: 2px solid var(--surface); border-radius: 11px; color: var(--accent-ink); font: 600 11px/1 var(--font); box-shadow: 0 1px 4px rgba(0,0,0,.45); background: var(--accent); }
+.st-pin.st-shade-1 { background: color-mix(in srgb, var(--accent) 82%, var(--surface)); }
+/* shade 2 is a pale fill with accent text: 4.5:1 or better in both themes */
+.st-pin.st-shade-2 { background: color-mix(in srgb, var(--accent) 20%, var(--surface)); color: var(--accent); border-color: var(--accent); }
+.st-pin.st-rec { box-shadow: 0 0 0 2px var(--accent), 0 1px 5px rgba(0,0,0,.5); z-index: 1000; }
+.st-pin.active { outline: 3px solid var(--ink); outline-offset: 1px; }
+.st-zoomed-out .st-pin:not(.st-rec) { width: 12px !important; height: 12px !important; margin-left: -6px !important; margin-top: -6px !important; font-size: 0; border-width: 1px; border-radius: 50%; }
+.leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--surface); color: var(--ink); }
+.leaflet-container a.leaflet-popup-close-button { color: var(--muted); }
+.st-popup b { display: block; }
+.st-popup span { display: block; color: var(--muted); }
+.st-popup .st-add { margin-top: 8px; height: 32px; }
+.rs-row.active { background: var(--accent-soft); }
 .leaflet-container { font: inherit; background: var(--bg); }
 .osm-dark .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.9) contrast(.85) saturate(.6); }
 .leaflet-container .leaflet-control-attribution { background: color-mix(in srgb, var(--surface) 88%, transparent); color: var(--muted); font-size: 11px; }
@@ -392,6 +423,42 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
         </div>
       </section>
 
+      <section class="results rs" id="routeStations" aria-labelledby="h-rs" hidden>
+        <div>
+          <h2 id="h-rs">Stations on your route</h2>
+          <div class="hint" id="rsSummary" role="status"></div>
+        </div>
+        <div class="rs-opts">
+          <div>
+            <div class="field-label" id="rsDetourLabel">Off route</div>
+            <div class="seg" role="radiogroup" aria-labelledby="rsDetourLabel">
+              <label><input type="radio" name="detourKm" value="1"><span>1 km</span></label>
+              <label><input type="radio" name="detourKm" value="2" checked><span>2 km</span></label>
+              <label><input type="radio" name="detourKm" value="5"><span>5 km</span></label>
+            </div>
+          </div>
+          <div>
+            <div class="field-label" id="rsSortLabel">Sort by</div>
+            <div class="seg seg2" role="radiogroup" aria-labelledby="rsSortLabel">
+              <label><input type="radio" name="stationSort" value="price" checked><span>Price</span></label>
+              <label><input type="radio" name="stationSort" value="along"><span>Along the route</span></label>
+            </div>
+          </div>
+        </div>
+        <div class="rs-rec" id="rsRecommend" hidden>
+          <p id="rsRecText"></p>
+          <button id="rsAddRec" class="primary" type="button">Add as stop</button>
+        </div>
+        <div class="msg err" id="rsMsg" role="status"></div>
+        <div class="rs-empty" id="rsEmpty" hidden>
+          <span id="rsEmptyText"></span>
+          <button id="rsWiden" class="quiet" type="button">Try 5 km</button>
+        </div>
+        <ul class="rs-list" id="rsList"></ul>
+        <button id="rsShowAll" class="quiet" type="button" hidden></button>
+        <div class="hint" id="rsNote" hidden>Positions are looked up from addresses, so a few stations can't be shown.</div>
+      </section>
+
       <div class="mapbox">
         <div id="map" role="region" aria-label="Route map"></div>
         <div class="mapnote" id="mapNote" role="status" hidden></div>
@@ -485,7 +552,7 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
 
   </main>
 
-  <footer class="foot">Map data &copy; OpenStreetMap contributors, tiles &copy; CARTO. Fuel prices: Lithuanian Energy Agency (LEA) and the companies operating the stations. Address search by Photon, municipality lookup by Nominatim (OpenStreetMap), routes by OSRM or OpenRouteService.</footer>
+  <footer class="foot">Map data &copy; OpenStreetMap contributors, tiles &copy; CARTO. Fuel prices: Lithuanian Energy Agency (LEA) and the companies operating the stations. Address search by Photon, municipality lookup by Nominatim (OpenStreetMap), routes by OSRM or OpenRouteService. Station positions looked up from addresses with Photon and Nominatim.</footer>
 </div>
 
 <div class="minibar" id="minibar" aria-hidden="true">
@@ -496,6 +563,7 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="config.js"></script>   <!-- optional, local only: window.FC_CONFIG = { cartoKey } -->
 <script src="prices.js"></script>
+<script src="route-stations.js"></script>
 <script>
 /* ---------- Configuration ---------- */
 
@@ -580,6 +648,7 @@ function readConsFields() {
   c.cons.highway = parseFloat($("consHwy").value) || c.cons.highway;
   store.set("fc.cars", cars);
   calc();
+  renderRouteStations();
 }
 
 /* ---------- Calculation ---------- */
@@ -905,6 +974,7 @@ function applyPriceToInput() {
   $("muniNote").hidden = !muniMsg;
   if (!priceDirty) $("price").value = value != null ? Math.round(value * 1000) / 1000 : "";
   calc();
+  renderRouteStations();
 }
 
 function reloadPricesFile() {
@@ -926,7 +996,7 @@ const places = {
   origin: null,
   dest: null
 };
-let map = null, routeLine = null, pinLayer = null;
+let map = null, routeLine = null, pinLayer = null, stationLayer = null;
 
 function showMapNote(text) { const n = $("mapNote"); n.textContent = text; n.hidden = !text; }
 
@@ -948,6 +1018,8 @@ function initMap() {
   if (!window.L) { showMapNote(MAP_LIB_NOTE); syncOfflineNote(); return; }
   map = L.map("map").setView([55.17, 23.9], 7);
   pinLayer = L.layerGroup().addTo(map);
+  stationLayer = L.layerGroup().addTo(map);
+  map.on("zoomend", syncStationDots);
   applyMapTheme();
   drawPins(true);
 }
@@ -995,6 +1067,9 @@ function applyMapTheme() {
 const stops = [];            // extra stops between From and To: { id, place, input, row, labelText }
 const MAX_STOPS = 8;
 let stopSeq = 0;
+let routeCoords = null;      // the calculated route as [lat, lng] points, or null when there is no route to measure against
+let routeItems = [];         // stations along the route in the chosen order (RouteStations.corridor items)
+let routeRecommendation = null;   // RouteStations.recommend result for routeItems
 let lastRoute = null;        // { legs: [{ meters, seconds }], names: [...] } from the last calculated route
 
 const pinLetter = (i) => String.fromCharCode(65 + i);
@@ -1017,6 +1092,7 @@ function drawPins(fit) {
 }
 
 function placesChanged() {
+  clearRouteStations();   // the route line no longer matches the places
   drawPins(true);
   if (lastRoute) $("distHint").textContent = "Places changed. Calculate the route again to update the distance.";
 }
@@ -1288,6 +1364,7 @@ async function calculateRoute() {
     lastRoute = r.legs.length === points.length - 1 ? { legs: r.legs, names: points.map((p) => shortName(p.label)) } : null;
 
     const latlngs = r.coords.map((c) => [c[1], c[0]]);
+    routeCoords = latlngs;
     if (routeLine) routeLine.remove();
     routeLine = L.polyline(latlngs, { color: accentColor(), weight: 5, opacity: 0.9 }).addTo(map);
     drawPins(false);
@@ -1295,13 +1372,207 @@ async function calculateRoute() {
 
     msg.className = "msg ok"; msg.textContent = fmt(km, 1) + " km, " + fmtDuration(r.seconds);
     calc();
+    renderRouteStations();
   } catch (e) {
+    clearRouteStations();
     msg.className = "msg err";
     msg.textContent = e instanceof TypeError ? "Could not reach the address or routing service. Check your connection." : e.message;
   } finally {
     $("routeBtn").disabled = false;
   }
 }
+
+/* ----- Stations along the route ----- */
+
+const RS_ROWS = 10;
+const RS_COVERAGE = "Positions are looked up from addresses, so a few stations can't be shown.";
+let rsShowAll = false;
+
+const rsChoice = (name, allowed, fallback) => {
+  const v = store.get(name === "detourKm" ? "fc.detourKm" : "fc.stationSort");
+  return allowed.includes(String(v)) ? String(v) : fallback;
+};
+const rsRadio = (name) => document.querySelector('input[name="' + name + '"]:checked').value;
+const rsTown = (a) => String(a || "").split(",")[0].trim();
+
+function clearRouteStations() {
+  routeCoords = null;
+  renderRouteStations();
+}
+
+function renderRouteStations() {
+  const sec = $("routeStations");
+  routeItems = []; routeRecommendation = null; rsShowAll = false;
+  $("rsMsg").textContent = "";
+  if (!routeCoords || !lea) {
+    sec.hidden = true;
+    if (typeof drawStationPins === "function") drawStationPins(routeItems, routeRecommendation);
+    return;
+  }
+  const c = car(), km = Number(rsRadio("detourKm"));
+  const positioned = lea.stations.some((s) => s.g);
+  routeItems = positioned ? RouteStations.sortItems(RouteStations.corridor(lea.stations, routeCoords,
+    { field: FIELD[c.fuel], network: $("priceNetwork").value, maxOffKm: km }), "price") : [];
+  routeRecommendation = RouteStations.recommend(routeItems, { fillL: c.tank, consPer100: c.cons.mixed });
+  drawRouteStationRows();
+  sec.hidden = false;
+  if (typeof drawStationPins === "function") drawStationPins(routeItems, routeRecommendation);
+}
+
+function drawRouteStationRows() {
+  const c = car(), km = Number(rsRadio("detourKm")), n = routeItems.length;
+  const positioned = lea.stations.some((s) => s.g);
+  const rec = routeRecommendation;
+  $("rsSummary").textContent = n ? n + (n === 1 ? " station" : " stations") + " with a " + FUELS[c.fuel] + " price within " + km + " km of your route"
+    : "";
+  $("rsRecommend").hidden = !n;
+  if (n) {
+    $("rsRecText").textContent = rec
+      ? "Cheapest stop on your way: " + rec.item.station.c + ", " + rsTown(rec.item.station.a) + ". " + fmt(rec.item.price, 3) +
+        " EUR/l, about " + fmt(rec.item.offKm, 1) + " km off route. A " + c.tank + " L fill saves about " + fmt(rec.saving, 2) +
+        " EUR against the average on your route."
+      : "Prices on your route are within a few cents of each other, so any station will do.";
+    $("rsAddRec").hidden = !rec;
+  }
+  $("rsEmptyText").textContent = positioned ? "No stations with a known position within " + km + " km of this route."
+    : "Station positions aren't available yet.";
+  $("rsWiden").hidden = !positioned || km >= 5;
+  $("rsEmpty").hidden = n > 0;
+  $("rsNote").hidden = !positioned;
+
+  const ordered = RouteStations.sortItems(routeItems, rsRadio("stationSort"));
+  const shown = rsShowAll ? ordered : ordered.slice(0, RS_ROWS);
+  const ul = $("rsList");
+  ul.innerHTML = "";
+  shown.forEach((it) => {
+    const li = document.createElement("li");
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "rs-row" + (rec && rec.item === it ? " rec" : "");
+    b.dataset.i = routeItems.indexOf(it);
+    b.setAttribute("aria-label", it.station.c + ", " + it.station.a + ", " + fmt(it.price, 3) + " EUR/l");
+    const p = document.createElement("span"); p.className = "p"; p.textContent = fmt(it.price, 3);
+    const t = document.createElement("span"); t.textContent = it.station.c;
+    const small = document.createElement("small"); small.textContent = it.station.a;
+    const where = document.createElement("small");
+    where.textContent = "at " + fmt(it.alongKm, 0) + " km, about " + fmt(it.offKm, 1) + " km off route";
+    t.append(small, where);
+    b.append(p, t);
+    li.appendChild(b); ul.appendChild(li);
+  });
+  const more = ordered.length > RS_ROWS && !rsShowAll;
+  $("rsShowAll").hidden = !more;
+  $("rsShowAll").textContent = "Show all " + ordered.length;
+}
+
+function addStopAt(index, place) {
+  const stop = addStop(false);
+  if (!stop) return null;
+  stops.pop();
+  stops.splice(index, 0, stop);
+  const next = stops[index + 1];
+  $("stops").insertBefore(stop.row, next ? next.row : null);
+  stop.place = place;
+  stop.input.value = place.label;
+  renumberStops();
+  return stop;
+}
+
+// ----- price pins along the route -----
+const stationMarkers = new Map();   // routeItems item -> marker
+let activeStation = null;
+
+function syncStationDots() {
+  if (map) map.getContainer().classList.toggle("st-zoomed-out", map.getZoom() < 10);
+}
+
+function stationRow(item) {
+  return $("rsList").querySelector('.rs-row[data-i="' + routeItems.indexOf(item) + '"]');
+}
+
+function setActiveStation(item, scroll) {
+  activeStation = item;
+  stationMarkers.forEach((m, it) => { if (m._icon) m._icon.classList.toggle("active", it === item); });
+  $("rsList").querySelectorAll(".rs-row.active").forEach((r) => r.classList.remove("active"));
+  const row = item && stationRow(item);
+  if (row) { row.classList.add("active"); if (scroll) row.scrollIntoView({ block: "nearest" }); }
+}
+
+function stationPopup(item) {
+  const s = item.station, box = document.createElement("div");
+  box.className = "st-popup";
+  const n = document.createElement("b"); n.textContent = s.c;
+  const a = document.createElement("span"); a.textContent = s.a;
+  const p = document.createElement("span"); p.textContent = fmt(item.price, 3) + " EUR/l on " + fmtDate(lea.date);
+  const add = document.createElement("button");
+  add.type = "button"; add.className = "st-add primary"; add.textContent = "Add as stop";
+  add.addEventListener("click", () => { map.closePopup(); addStationStop(item); });
+  box.append(n, a, p, add);
+  return box;
+}
+
+function drawStationPins(items, rec) {
+  if (!map || !stationLayer) return;
+  stationLayer.clearLayers();
+  stationMarkers.clear();
+  activeStation = null;
+  syncStationDots();
+  if (!items.length) return;
+  let min = Infinity, max = -Infinity;
+  items.forEach((it) => { min = Math.min(min, it.price); max = Math.max(max, it.price); });
+  items.forEach((it) => {
+    const isRec = !!rec && rec.item === it;
+    const icon = L.divIcon({
+      className: "st-pin st-shade-" + RouteStations.shade(it.price, min, max) + (isRec ? " st-rec" : ""),
+      html: fmt(it.price, 3), iconSize: [48, 22], iconAnchor: [24, 11]
+    });
+    const m = L.marker(it.station.g, { icon: icon, keyboard: false, zIndexOffset: isRec ? 1000 : 0 });
+    m.bindPopup(() => stationPopup(it));
+    m.on("popupopen", () => setActiveStation(it, true));
+    m.addTo(stationLayer);
+    stationMarkers.set(it, m);
+  });
+}
+
+function focusStationPin(item) {
+  const m = stationMarkers.get(item);
+  if (!map || !m) return;
+  setActiveStation(item, false);
+  map.panTo(m.getLatLng());
+  m.openPopup();
+  const add = m.getPopup() && m.getPopup().getElement() && m.getPopup().getElement().querySelector(".st-add");
+  if (add) add.focus({ preventScroll: true });   // so the keyboard can add this station
+}
+
+function addStationStop(item) {
+  if ($("routeBtn").disabled) return;   // a route is being calculated; a second click would add a duplicate stop
+  if (stops.length >= MAX_STOPS) { $("rsMsg").textContent = "A trip can have up to " + MAX_STOPS + " stops."; return; }
+  const s = item.station;
+  let along = 0;   // a stop without a position yet counts as sitting where the previous one does
+  const alongs = stops.map((st) => {
+    if (st.place) along = RouteStations.project(routeCoords, [st.place.lat, st.place.lng]).alongKm;
+    return along;
+  });
+  addStopAt(RouteStations.insertIndex(item.alongKm, alongs), { lat: s.g[0], lng: s.g[1], label: s.c + ", " + s.a });
+  calculateRoute();
+}
+
+$("rsAddRec").addEventListener("click", () => { if (routeRecommendation) addStationStop(routeRecommendation.item); });
+$("rsList").addEventListener("click", (e) => {
+  const b = e.target.closest(".rs-row");
+  if (b && routeItems[b.dataset.i] && typeof focusStationPin === "function") focusStationPin(routeItems[b.dataset.i]);
+});
+$("rsShowAll").addEventListener("click", () => { rsShowAll = true; drawRouteStationRows(); });
+$("rsWiden").addEventListener("click", () => {
+  document.querySelector('input[name="detourKm"][value="5"]').click();
+});
+document.querySelectorAll('input[name="detourKm"], input[name="stationSort"]').forEach((r) => r.addEventListener("change", () => {
+  store.set(r.name === "detourKm" ? "fc.detourKm" : "fc.stationSort", r.value);
+  renderRouteStations();
+}));
+["detourKm", "stationSort"].forEach((name) => {
+  const saved = name === "detourKm" ? rsChoice(name, ["1", "2", "5"], "2") : rsChoice(name, ["price", "along"], "price");
+  document.querySelector('input[name="' + name + '"][value="' + saved + '"]').checked = true;
+});
 
 /* ---------- Measure consumption ---------- */
 
@@ -1320,7 +1591,7 @@ function measure() {
 $("carSelect").addEventListener("change", (e) => { carId = e.target.value; store.set("fc.carId", carId); syncCarFields(); });
 ["consCity", "consMixed", "consHwy"].forEach((id) => $(id).addEventListener("change", readConsFields));
 ["distance", "price"].forEach((id) => $(id).addEventListener("input", () => { if (id === "price") priceDirty = true; calc(); }));
-$("distance").addEventListener("input", () => { $("distHint").textContent = "Manual distance."; lastRoute = null; renderLegs(); });
+$("distance").addEventListener("input", () => { $("distHint").textContent = "Manual distance."; lastRoute = null; renderLegs(); clearRouteStations(); });
 $("addStop").addEventListener("click", addStop);
 $("roundTrip").addEventListener("change", calc);
 document.querySelectorAll('input[name="cycle"]').forEach((r) => r.addEventListener("change", calc));
@@ -1460,6 +1731,7 @@ function loadTrip(t) {
   if (r) r.checked = true;
   $("perWeek").value = t.perWeek || "";
   lastRoute = t.legs || null;
+  clearRouteStations();
   if (routeLine) { routeLine.remove(); routeLine = null; }
   $("distHint").textContent = "Saved distance for " + t.name + ". Updating the route...";
   drawPins(true);

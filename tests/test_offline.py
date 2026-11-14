@@ -298,8 +298,21 @@ class OfflineTest(unittest.TestCase):
             p.wait_for_timeout(100)
         keys = p.evaluate("caches.keys()")
         self.assertIn("other-project", keys)
-        self.assertIn("fc-v2", keys)
+        self.assertIn("fc-v3", keys)
         self.assertNotIn("fc-old", keys)
+
+    def test_route_stations_js_cached(self):
+        self.load()
+        cached = self.page.evaluate("""async () => {
+            const out = [];
+            for (const name of await caches.keys()) {
+                const c = await caches.open(name);
+                for (const req of await c.keys()) out.push(req.url);
+            }
+            return out;
+        }""")
+        self.assertTrue([u for u in cached if u.endswith("/route-stations.js")],
+                        "route-stations.js is not in the offline cache: %s" % cached)
 
     def test_server_error_keeps_cached_prices(self):
         old = datetime.date.today() - datetime.timedelta(days=2)

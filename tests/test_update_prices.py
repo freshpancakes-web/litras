@@ -5,7 +5,9 @@ import json
 import os
 import sys
 import tempfile
+import io
 import unittest
+from contextlib import redirect_stdout
 from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -162,6 +164,91 @@ class LocalFileTests(unittest.TestCase):
     def test_none_when_absent(self):
         with tempfile.TemporaryDirectory() as d:
             self.assertIsNone(up.newest_local_xlsx(d))
+
+
+class PositionsTests(unittest.TestCase):
+    ADDR = "Garliava, Vytauto g. 111A, 53258"
+
+    def rows(self):
+        day = dt.date(2026, 11, 14)
+        return [(day, "UAB Alfa", "Kauno r. sav.", self.ADDR, "diesel", 1.9),
+                (day, "UAB Beta", "Vilniaus m. sav.", "Vilnius, Gedimino pr. 1", "diesel", 1.8)]
+
+    def many_rows(self):
+        day = dt.date(2026, 11, 14)
+        return [(day, "UAB Alfa", "Kauno r. sav.", "Town, Street %d, 5325%d" % (i, i), "diesel", 1.9)
+                for i in range(8)]
+
+    def run_main(self, d, extra, get):
+        coords = os.path.join(d, "station-coords.json")
+        out = os.path.join(d, "prices.js")
+        with mock.patch.object(up, "parse", return_value=self.rows()), \
+                mock.patch.object(up, "COORDS_FILE", coords), \
+                mock.patch.object(up.geocode_stations, "http_get", get), \
+                mock.patch("time.sleep"):
+            code = up.main(["update_prices.py", "fake.xlsx", out] + extra)
+        return code, coords, up.read_prices_js(out)
+
+    def test_main_applies_cached_positions_without_lookups(self):
+        def boom(url):
+            raise AssertionError("network used")
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "station-coords.json"), "w") as f:
+                json.dump({self.ADDR: {"g": [54.82, 23.87], "checked": "2026-11-01"}}, f)
+            code, _, data = self.run_main(d, ["--no-geocode"], boom)
+        self.assertEqual(code, 0)
+        by_addr = {s["a"]: s for s in data["stations"]}
+        self.assertEqual(by_addr[self.ADDR]["g"], [54.82, 23.87])
+        self.assertNotIn("g", by_addr["Vilnius, Gedimino pr. 1"])
+
+    def test_main_geocodes_and_saves_cache(self):
+        def fake(url):
+            if "photon" in url:
+                return {"features": [{"geometry": {"coordinates": [23.87, 54.82]}, "properties": {"type": "house"}}]}
+            return {"address": {"state_district": "Kauno rajono savivaldybė"}}
+        with tempfile.TemporaryDirectory() as d:
+            code, coords, data = self.run_main(d, [], fake)
+            with open(coords, encoding="utf-8") as f:
+                cache = json.load(f)
+        self.assertEqual(code, 0)
+        self.assertEqual(cache[self.ADDR]["g"], [54.82, 23.87])
+        self.assertEqual([s["g"] for s in data["stations"] if s["a"] == self.ADDR], [[54.82, 23.87]])
+
+    def test_main_logs_why_geocoding_stopped_and_passes_a_save_callback(self):
+        def down(url):
+            raise OSError("down")
+        saves = []
+        real = up.geocode_stations.update_cache
+
+        def spy(stations, cache, today, get, **kw):
+            saves.append(kw.get("save"))
+            kw.setdefault("sleep", lambda seconds: None)
+            return real(stations, cache, today, get, **kw)
+        buf = io.StringIO()
+        with tempfile.TemporaryDirectory() as d, redirect_stdout(buf), \
+                mock.patch.object(up.geocode_stations, "update_cache", spy), \
+                mock.patch.object(self, "rows", lambda: self.many_rows()):
+            code, _, _ = self.run_main(d, [], down)
+        self.assertEqual(code, 0)
+        self.assertTrue(callable(saves[0]))
+        self.assertRegex(buf.getvalue(), r"Positions: .*Stopped early \(errors\)")
+
+    def test_main_log_has_no_stop_note_when_all_went_well(self):
+        def fake(url):
+            if "photon" in url:
+                return {"features": [{"geometry": {"coordinates": [23.87, 54.82]}, "properties": {"type": "house"}}]}
+            return {"address": {"state_district": "Kauno rajono savivaldybė"}}
+        buf = io.StringIO()
+        with tempfile.TemporaryDirectory() as d, redirect_stdout(buf):
+            self.run_main(d, [], fake)
+        self.assertNotIn("stopped", buf.getvalue())
+
+    def test_workflow_commits_coords(self):
+        with open(os.path.join(ROOT, ".github", "workflows", "update-prices.yml"), encoding="utf-8") as f:
+            text = f.read()
+        self.assertIn("git add prices.js station-coords.json", text)
+        self.assertIn("timeout-minutes: 45", text)
+        self.assertIn("git diff --quiet -- station-coords.json", text)
 
 
 if __name__ == "__main__":
