@@ -280,6 +280,18 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
 .sugg button { display: block; width: 100%; height: auto; text-align: left; border: 0; border-radius: 6px; background: transparent; padding: 9px 10px; font-weight: 400; }
 .sugg button:hover, .sugg button.active, .sugg button:focus-visible { background: var(--accent-soft); outline-offset: -2px; }
 .pin { display: flex; align-items: center; justify-content: center; background: var(--accent); color: var(--accent-ink); border: 2px solid var(--surface); border-radius: 50%; font: 600 12px/1 var(--font); box-shadow: 0 1px 5px rgba(0,0,0,.45); }
+.st-pin { display: flex; align-items: center; justify-content: center; border: 2px solid var(--surface); border-radius: 11px; color: var(--accent-ink); font: 600 11px/1 var(--font); box-shadow: 0 1px 4px rgba(0,0,0,.45); background: var(--accent); }
+.st-pin.st-shade-1 { background: color-mix(in srgb, var(--accent) 78%, var(--surface)); }
+.st-pin.st-shade-2 { background: color-mix(in srgb, var(--accent) 58%, var(--surface)); }
+.st-pin.st-rec { box-shadow: 0 0 0 2px var(--accent), 0 1px 5px rgba(0,0,0,.5); z-index: 1000; }
+.st-pin.active { outline: 3px solid var(--ink); outline-offset: 1px; }
+.st-zoomed-out .st-pin:not(.st-rec) { width: 12px !important; height: 12px !important; margin-left: -6px !important; margin-top: -6px !important; font-size: 0; border-width: 1px; border-radius: 50%; }
+.leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--surface); color: var(--ink); }
+.leaflet-container a.leaflet-popup-close-button { color: var(--muted); }
+.st-popup b { display: block; }
+.st-popup span { display: block; color: var(--muted); }
+.st-popup .st-add { margin-top: 8px; height: 32px; }
+.rs-row.active { background: var(--accent-soft); }
 .leaflet-container { font: inherit; background: var(--bg); }
 .osm-dark .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.9) contrast(.85) saturate(.6); }
 .leaflet-container .leaflet-control-attribution { background: color-mix(in srgb, var(--surface) 88%, transparent); color: var(--muted); font-size: 11px; }
@@ -983,7 +995,7 @@ const places = {
   origin: null,
   dest: null
 };
-let map = null, routeLine = null, pinLayer = null;
+let map = null, routeLine = null, pinLayer = null, stationLayer = null;
 
 function showMapNote(text) { const n = $("mapNote"); n.textContent = text; n.hidden = !text; }
 
@@ -1005,6 +1017,8 @@ function initMap() {
   if (!window.L) { showMapNote(MAP_LIB_NOTE); syncOfflineNote(); return; }
   map = L.map("map").setView([55.17, 23.9], 7);
   pinLayer = L.layerGroup().addTo(map);
+  stationLayer = L.layerGroup().addTo(map);
+  map.on("zoomend", syncStationDots);
   applyMapTheme();
   drawPins(true);
 }
@@ -1459,6 +1473,70 @@ function addStopAt(index, place) {
   stop.input.value = place.label;
   renumberStops();
   return stop;
+}
+
+// ----- price pins along the route -----
+const stationMarkers = new Map();   // routeItems item -> marker
+let activeStation = null;
+
+function syncStationDots() {
+  if (map) map.getContainer().classList.toggle("st-zoomed-out", map.getZoom() < 10);
+}
+
+function stationRow(item) {
+  return $("rsList").querySelector('.rs-row[data-i="' + routeItems.indexOf(item) + '"]');
+}
+
+function setActiveStation(item, scroll) {
+  activeStation = item;
+  stationMarkers.forEach((m, it) => { if (m._icon) m._icon.classList.toggle("active", it === item); });
+  $("rsList").querySelectorAll(".rs-row.active").forEach((r) => r.classList.remove("active"));
+  const row = item && stationRow(item);
+  if (row) { row.classList.add("active"); if (scroll) row.scrollIntoView({ block: "nearest" }); }
+}
+
+function stationPopup(item) {
+  const s = item.station, box = document.createElement("div");
+  box.className = "st-popup";
+  const n = document.createElement("b"); n.textContent = s.c;
+  const a = document.createElement("span"); a.textContent = s.a;
+  const p = document.createElement("span"); p.textContent = fmt(item.price, 3) + " EUR/l on " + fmtDate(lea.date);
+  const add = document.createElement("button");
+  add.type = "button"; add.className = "st-add primary"; add.textContent = "Add as stop";
+  add.addEventListener("click", () => { map.closePopup(); addStationStop(item); });
+  box.append(n, a, p, add);
+  return box;
+}
+
+function drawStationPins(items, rec) {
+  if (!map || !stationLayer) return;
+  stationLayer.clearLayers();
+  stationMarkers.clear();
+  activeStation = null;
+  syncStationDots();
+  if (!items.length) return;
+  let min = Infinity, max = -Infinity;
+  items.forEach((it) => { min = Math.min(min, it.price); max = Math.max(max, it.price); });
+  items.forEach((it) => {
+    const isRec = !!rec && rec.item === it;
+    const icon = L.divIcon({
+      className: "st-pin st-shade-" + RouteStations.shade(it.price, min, max) + (isRec ? " st-rec" : ""),
+      html: fmt(it.price, 3), iconSize: [48, 22], iconAnchor: [24, 11]
+    });
+    const m = L.marker(it.station.g, { icon: icon, keyboard: false, zIndexOffset: isRec ? 1000 : 0 });
+    m.bindPopup(() => stationPopup(it));
+    m.on("popupopen", () => setActiveStation(it, true));
+    m.addTo(stationLayer);
+    stationMarkers.set(it, m);
+  });
+}
+
+function focusStationPin(item) {
+  const m = stationMarkers.get(item);
+  if (!map || !m) return;
+  setActiveStation(item, false);
+  map.panTo(m.getLatLng());
+  m.openPopup();
 }
 
 function addStationStop(item) {

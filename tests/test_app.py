@@ -1190,6 +1190,78 @@ class AppTest(unittest.TestCase):
                 self.assertTrue(page.locator("#routeStations").is_visible())
                 self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth"), 360)
 
+    # ----- price pins -----
+
+    def test_pins_match_list(self):
+        page = self.route_with(list(self.stations_trio()))
+        self.assertEqual(page.locator(".st-pin").count(), 2)
+        self.assertEqual(sorted(page.locator(".st-pin").all_text_contents()), ["1.800", "1.900"])
+
+    def test_cheapest_pin_is_darkest(self):
+        page = self.route_with(list(self.stations_trio()))
+        self.assertTrue(page.locator(".st-pin", has_text="1.800").evaluate("e => e.classList.contains('st-shade-0')"))
+        self.assertTrue(page.locator(".st-pin", has_text="1.900").evaluate("e => e.classList.contains('st-shade-2')"))
+
+    def test_recommended_pin_marked(self):
+        page = self.route_with(list(self.stations_trio()))
+        self.assertEqual(page.locator(".st-rec").count(), 1)
+        self.assertIn("1.800", page.locator(".st-rec").inner_text())
+
+    def test_dots_when_zoomed_out(self):
+        page = self.route_with(list(self.stations_trio()))
+        page.wait_for_timeout(800)   # let the route fit settle
+        page.evaluate("map.setView(map.getCenter(), 8, {animate: false})")
+        page.wait_for_function("document.querySelector('#map').classList.contains('st-zoomed-out')")
+        self.assertEqual(page.locator(".st-pin:not(.st-rec)").evaluate("e => getComputedStyle(e).fontSize"), "0px")
+        self.assertNotEqual(page.locator(".st-rec").evaluate("e => getComputedStyle(e).fontSize"), "0px")
+        page.evaluate("map.setView(map.getCenter(), 12, {animate: false})")
+        page.wait_for_function("!document.querySelector('#map').classList.contains('st-zoomed-out')")
+
+    def test_row_and_pin_highlight_each_other(self):
+        page = self.route_with(list(self.stations_trio()))
+        page.click("#rsList .rs-row >> nth=1")
+        self.assertTrue(page.locator(".leaflet-popup").is_visible())
+        self.assertIn("1.900", page.locator(".st-pin.active").inner_text())
+        self.assertEqual(page.locator("#rsList .rs-row.active").count(), 1)
+        self.assertIn("1.900", page.locator("#rsList .rs-row.active").inner_text())
+        page.locator(".st-pin", has_text="1.800").click()
+        self.assertEqual(page.locator("#rsList .rs-row.active").count(), 1)
+        self.assertIn("1.800", page.locator("#rsList .rs-row.active").inner_text())
+
+    def test_popup_shows_details(self):
+        page = self.route_with(list(self.stations_trio()))
+        page.locator(".st-pin", has_text="1.800").click()
+        text = page.locator(".leaflet-popup").inner_text()
+        self.assertIn("Test Oil", text)
+        self.assertIn("Kaunas, Savanorių pr. 1", text)
+        self.assertRegex(text, r"1\.800 EUR/l on \d{1,2} \w{3} \d{4}")
+
+    def test_popup_add_as_stop(self):
+        page = self.route_with(list(self.stations_trio()))
+        page.locator(".st-pin", has_text="1.900").click()
+        page.click(".leaflet-popup .st-add")
+        page.wait_for_function("document.getElementById('stop1In') && document.getElementById('stop1In').value")
+        self.assertTrue(self.value("stop1In").startswith("Viada"))
+
+    def test_recalculating_replaces_pins(self):
+        page = self.route_with(list(self.stations_trio()))
+        page.click("#rsAddRec")
+        page.wait_for_function("document.getElementById('stop1In') && document.getElementById('stop1In').value")
+        page.wait_for_function("document.getElementById('routeBtn').disabled === false")
+        n = page.evaluate("routeItems.length")
+        self.assertGreater(n, 0)
+        self.assertEqual(page.locator(".st-pin").count(), n)
+        self.assertEqual(page.locator("#rsList .rs-row").count(), n)
+        self.assertEqual(page.locator(".st-rec").count(), 1 if page.evaluate("!!routeRecommendation") else 0)
+
+    def test_no_pins_without_route(self):
+        page = self.open(stations=list(self.stations_trio()))
+        self.assertEqual(page.locator(".st-pin").count(), 0)
+        page = self.route_with(list(self.stations_trio()))
+        self.assertEqual(page.locator(".st-pin").count(), 2)
+        page.fill("#distance", "80")
+        self.assertEqual(page.locator(".st-pin").count(), 0)
+
     # ----- secrets -----
 
     def test_no_secret_tracked(self):
