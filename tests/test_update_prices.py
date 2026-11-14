@@ -5,7 +5,9 @@ import json
 import os
 import sys
 import tempfile
+import io
 import unittest
+from contextlib import redirect_stdout
 from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -206,6 +208,34 @@ class PositionsTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(cache[self.ADDR]["g"], [54.82, 23.87])
         self.assertEqual([s["g"] for s in data["stations"] if s["a"] == self.ADDR], [[54.82, 23.87]])
+
+    def test_main_logs_why_geocoding_stopped_and_passes_a_save_callback(self):
+        def down(url):
+            raise OSError("down")
+        saves = []
+        real = up.geocode_stations.update_cache
+
+        def spy(stations, cache, today, get, **kw):
+            saves.append(kw.get("save"))
+            kw.setdefault("sleep", lambda seconds: None)
+            return real(stations, cache, today, get, **kw)
+        buf = io.StringIO()
+        with tempfile.TemporaryDirectory() as d, redirect_stdout(buf), \
+                mock.patch.object(up.geocode_stations, "update_cache", spy):
+            code, _, _ = self.run_main(d, [], down)
+        self.assertEqual(code, 0)
+        self.assertTrue(callable(saves[0]))
+        self.assertRegex(buf.getvalue(), r"Positions: .*stopped early \(errors\)")
+
+    def test_main_log_has_no_stop_note_when_all_went_well(self):
+        def fake(url):
+            if "photon" in url:
+                return {"features": [{"geometry": {"coordinates": [23.87, 54.82]}, "properties": {"type": "house"}}]}
+            return {"address": {"state_district": "Kauno rajono savivaldybė"}}
+        buf = io.StringIO()
+        with tempfile.TemporaryDirectory() as d, redirect_stdout(buf):
+            self.run_main(d, [], fake)
+        self.assertNotIn("stopped", buf.getvalue())
 
     def test_workflow_commits_coords(self):
         with open(os.path.join(ROOT, ".github", "workflows", "update-prices.yml"), encoding="utf-8") as f:

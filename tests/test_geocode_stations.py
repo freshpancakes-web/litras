@@ -110,7 +110,7 @@ class UpdateCacheTests(unittest.TestCase):
     def test_new_address_is_looked_up_and_cached(self):
         cache = {}
         result = gs.update_cache(stations(ADDR), cache, TODAY, FakeGet(dict(GOOD)), nosleep)
-        self.assertEqual(result, {"looked_up": 1, "found": 1, "skipped": 0})
+        self.assertEqual(result, {"looked_up": 1, "found": 1, "skipped": 0, "stopped": None})
         self.assertEqual(cache[ADDR], {"g": [54.82, 23.87], "checked": "2026-11-14"})
 
     def test_cache_hit_makes_no_requests(self):
@@ -144,14 +144,14 @@ class UpdateCacheTests(unittest.TestCase):
         get = FakeGet({"photon": OSError("down")})
         result = gs.update_cache(stations(ADDR), cache, TODAY, get, nosleep)
         self.assertEqual(cache, {})
-        self.assertEqual(result, {"looked_up": 0, "found": 0, "skipped": 1})
+        self.assertEqual(result, {"looked_up": 0, "found": 0, "skipped": 1, "stopped": None})
 
     def test_http_exceptions_count_as_skipped_not_cached(self):
         cache = {}
         get = FakeGet({"photon": http.client.IncompleteRead(b"")})
         result = gs.update_cache(stations(ADDR), cache, TODAY, get, nosleep)
         self.assertEqual(cache, {})
-        self.assertEqual(result, {"looked_up": 0, "found": 0, "skipped": 1})
+        self.assertEqual(result, {"looked_up": 0, "found": 0, "skipped": 1, "stopped": None})
 
     def test_failures_still_sleep_and_count_toward_limit(self):
         addrs = ["Town, Street %d, 5325%d" % (i, i) for i in range(5)]
@@ -160,12 +160,92 @@ class UpdateCacheTests(unittest.TestCase):
         result = gs.update_cache(stations(*addrs), {}, TODAY, get, sleeps.append, limit=2)
         self.assertEqual(len(get.urls), 2)
         self.assertEqual(sleeps, [0.5, 0.5])
-        self.assertEqual(result, {"looked_up": 0, "found": 0, "skipped": 2})
+        self.assertEqual(result, {"looked_up": 0, "found": 0, "skipped": 2, "stopped": None})
 
     def test_duplicate_addresses_are_looked_up_once(self):
         get = FakeGet(dict(GOOD))
         result = gs.update_cache(stations(ADDR, ADDR), {}, TODAY, get, nosleep)
         self.assertEqual(result["looked_up"], 1)
+
+
+def addrs(n):
+    return ["Town, Street %d, 5325%d" % (i, i) for i in range(n)]
+
+
+class FakeClock:
+    """Advances by `step` seconds every time it is read."""
+
+    def __init__(self, step):
+        self.now = 0.0
+        self.step = step
+
+    def __call__(self):
+        self.now += self.step
+        return self.now
+
+
+class SafetyTests(unittest.TestCase):
+    def test_time_budget_stops_lookups_and_keeps_what_was_found(self):
+        cache = {}
+        get = FakeGet(dict(GOOD))
+        # each clock read is one minute later; the 20-minute budget runs out after a few lookups
+        result = gs.update_cache(stations(*addrs(50)), cache, TODAY, get, nosleep, clock=FakeClock(60))
+        self.assertEqual(result["stopped"], "time")
+        self.assertGreater(result["looked_up"], 0)
+        self.assertLess(result["looked_up"], 50)
+        self.assertEqual(len(cache), result["looked_up"])
+
+    def test_no_stop_reason_when_everything_was_done(self):
+        result = gs.update_cache(stations(*addrs(3)), {}, TODAY, FakeGet(dict(GOOD)), nosleep)
+        self.assertIsNone(result["stopped"])
+
+    def test_five_consecutive_errors_stop_the_run(self):
+        cache = {}
+        get = FakeGet({"photon": OSError("down")})
+        result = gs.update_cache(stations(*addrs(20)), cache, TODAY, get, nosleep)
+        self.assertEqual(result["stopped"], "errors")
+        self.assertEqual(result["skipped"], 5)
+        self.assertEqual(len(get.urls), 5)
+        self.assertEqual(cache, {})
+
+    def test_a_success_resets_the_error_count(self):
+        replies = [OSError("x")] * 4 + [photon("house")] + [OSError("x")] * 4 + [photon("house")]
+        get = FakeGet({"photon": replies, "nominatim": nominatim("Kauno rajono savivaldybė")})
+        result = gs.update_cache(stations(*addrs(10)), {}, TODAY, get, nosleep)
+        self.assertIsNone(result["stopped"])
+        self.assertEqual(result["skipped"], 8)
+        self.assertEqual(result["looked_up"], 2)
+
+    def test_save_is_called_every_25_lookups_and_at_the_end(self):
+        saved = []
+        cache = {}
+        gs.update_cache(stations(*addrs(60)), cache, TODAY, FakeGet(dict(GOOD)), nosleep,
+                        save=lambda: saved.append(len(cache)))
+        self.assertEqual(saved, [25, 50, 60])
+
+    def test_save_is_called_when_an_unexpected_exception_escapes(self):
+        saved = []
+        cache = {}
+        get = FakeGet({"photon": RuntimeError("boom")})
+        with self.assertRaises(RuntimeError):
+            gs.update_cache(stations(*addrs(3)), cache, TODAY, get, nosleep, save=lambda: saved.append(1))
+        self.assertEqual(saved, [1])
+
+    def test_save_keeps_earlier_lookups_when_a_later_one_explodes(self):
+        cache = {}
+        seen = []
+        get = FakeGet({"photon": [photon("house"), RuntimeError("boom")],
+                       "nominatim": nominatim("Kauno rajono savivaldybė")})
+        with self.assertRaises(RuntimeError):
+            gs.update_cache(stations(*addrs(3)), cache, TODAY, get, nosleep, save=lambda: seen.append(dict(cache)))
+        self.assertEqual(len(seen[-1]), 1)
+
+    def test_http_get_timeout_is_10_seconds(self):
+        from unittest import mock
+        with mock.patch("urllib.request.urlopen") as op:
+            op.return_value.__enter__.return_value.read.return_value = b"{}"
+            gs.http_get("https://example.invalid/")
+        self.assertEqual(op.call_args.kwargs["timeout"], 10)
 
 
 class ApplyAndCacheFileTests(unittest.TestCase):
@@ -186,6 +266,18 @@ class ApplyAndCacheFileTests(unittest.TestCase):
                 f.write("not json")
             self.assertEqual(gs.load_cache(path), {})
             self.assertEqual(gs.load_cache(os.path.join(d, "missing.json")), {})
+
+    def test_save_cache_failure_leaves_the_old_file_intact(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "c.json")
+            old = {"Old": {"g": [1.0, 2.0], "checked": "2026-11-01"}}
+            gs.save_cache(path, old)
+            with mock.patch("json.dump", side_effect=OSError("disk full")):
+                with self.assertRaises(OSError):
+                    gs.save_cache(path, {"New": {"g": None, "checked": "2026-11-14"}})
+            self.assertEqual(gs.load_cache(path), old)
+            self.assertEqual(os.listdir(d), ["c.json"])
 
     def test_save_cache_sorted_and_unescaped(self):
         with tempfile.TemporaryDirectory() as d:

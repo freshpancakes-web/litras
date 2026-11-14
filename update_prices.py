@@ -334,9 +334,10 @@ def main(argv=None):
         cache = geocode_stations.load_cache(COORDS_FILE)
         if not no_geocode:
             result = geocode_stations.update_cache(data["stations"], cache, dt.date.today(),
-                                                   geocode_stations.http_get)
-            geocode_stations.save_cache(COORDS_FILE, cache)
-            log("Positions: %(found)d found, %(looked_up)d looked up, %(skipped)d skipped." % result)
+                                                   geocode_stations.http_get,
+                                                   save=lambda: geocode_stations.save_cache(COORDS_FILE, cache))
+            note = " Stopped early (%s)." % result["stopped"] if result["stopped"] else ""
+            log("Positions: %(found)d found, %(looked_up)d looked up, %(skipped)d skipped." % result + note)
         geocode_stations.apply_positions(data["stations"], cache)
         write_js(data, out)
         n = data["national"]

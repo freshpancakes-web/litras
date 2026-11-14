@@ -5,7 +5,9 @@ station's municipality. Positions are cached in station-coords.json so each addr
 import datetime
 import http.client
 import json
+import os
 import re
+import tempfile
 import time
 import urllib.parse
 import urllib.request
@@ -18,11 +20,15 @@ PHOTON_DELAY = 0.5
 NOMINATIM_DELAY = 1.1
 RETRY_DAYS = 30
 MAX_LOOKUPS = 900
+TIME_BUDGET = 20 * 60      # seconds: stop starting new lookups after this, so the price job never nears its timeout
+MAX_CONSECUTIVE_ERRORS = 5
+SAVE_EVERY = 25
+HTTP_TIMEOUT = 10
 
 
 def http_get(url):
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(request, timeout=30) as response:
+    with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
@@ -83,9 +89,19 @@ def load_cache(path):
 
 
 def save_cache(path, cache):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(cache, f, ensure_ascii=False, sort_keys=True, indent=0)
-        f.write("\n")
+    """Writes through a temp file in the same folder, then swaps it in, so a failure keeps the old file."""
+    fd, tmp = tempfile.mkstemp(prefix=".coords-", suffix=".tmp", dir=os.path.dirname(os.path.abspath(path)))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False, sort_keys=True, indent=0)
+            f.write("\n")
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _needs_lookup(entry, today):
@@ -100,29 +116,49 @@ def _needs_lookup(entry, today):
     return (today - checked).days > RETRY_DAYS
 
 
-def update_cache(stations, cache, today, get, sleep=time.sleep, limit=MAX_LOOKUPS):
-    looked_up = found = skipped = attempts = 0
+def update_cache(stations, cache, today, get, sleep=time.sleep, limit=MAX_LOOKUPS,
+                 clock=time.monotonic, save=None, budget=TIME_BUDGET):
+    """Looks up positions for new addresses. Stops early (stats["stopped"]) after `budget` seconds ("time")
+    or MAX_CONSECUTIVE_ERRORS service errors in a row ("errors"). `save()` runs every SAVE_EVERY lookups and
+    once at the end, even when something unexpected escapes."""
+    looked_up = found = skipped = attempts = errors_in_a_row = 0
+    stopped = None
+    started = clock()
     seen = set()
-    for s in stations:
-        address = s["a"]
-        if address in seen:
-            continue
-        seen.add(address)
-        if not _needs_lookup(cache.get(address), today):
-            continue
-        if attempts >= limit:
-            break
-        attempts += 1
-        try:
-            position = lookup(address, s["m"], get, sleep)
-        except (OSError, http.client.HTTPException, ValueError, KeyError, IndexError, TypeError):
-            skipped += 1
-            continue
-        looked_up += 1
-        if position:
-            found += 1
-        cache[address] = {"g": position, "checked": today.isoformat()}
-    return {"looked_up": looked_up, "found": found, "skipped": skipped}
+    try:
+        for s in stations:
+            address = s["a"]
+            if address in seen:
+                continue
+            seen.add(address)
+            if not _needs_lookup(cache.get(address), today):
+                continue
+            if attempts >= limit:
+                break
+            if clock() - started >= budget:
+                stopped = "time"
+                break
+            attempts += 1
+            try:
+                position = lookup(address, s["m"], get, sleep)
+            except (OSError, http.client.HTTPException, ValueError, KeyError, IndexError, TypeError):
+                skipped += 1
+                errors_in_a_row += 1
+            else:
+                errors_in_a_row = 0
+                looked_up += 1
+                if position:
+                    found += 1
+                cache[address] = {"g": position, "checked": today.isoformat()}
+            if errors_in_a_row >= MAX_CONSECUTIVE_ERRORS:
+                stopped = "errors"
+                break
+            if save and attempts % SAVE_EVERY == 0:
+                save()
+    finally:
+        if save:
+            save()
+    return {"looked_up": looked_up, "found": found, "skipped": skipped, "stopped": stopped}
 
 
 def apply_positions(stations, cache):
