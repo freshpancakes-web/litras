@@ -174,6 +174,11 @@ class PositionsTests(unittest.TestCase):
         return [(day, "UAB Alfa", "Kauno r. sav.", self.ADDR, "diesel", 1.9),
                 (day, "UAB Beta", "Vilniaus m. sav.", "Vilnius, Gedimino pr. 1", "diesel", 1.8)]
 
+    def many_rows(self):
+        day = dt.date(2026, 11, 14)
+        return [(day, "UAB Alfa", "Kauno r. sav.", "Town, Street %d, 5325%d" % (i, i), "diesel", 1.9)
+                for i in range(8)]
+
     def run_main(self, d, extra, get):
         coords = os.path.join(d, "station-coords.json")
         out = os.path.join(d, "prices.js")
@@ -221,11 +226,12 @@ class PositionsTests(unittest.TestCase):
             return real(stations, cache, today, get, **kw)
         buf = io.StringIO()
         with tempfile.TemporaryDirectory() as d, redirect_stdout(buf), \
-                mock.patch.object(up.geocode_stations, "update_cache", spy):
+                mock.patch.object(up.geocode_stations, "update_cache", spy), \
+                mock.patch.object(self, "rows", lambda: self.many_rows()):
             code, _, _ = self.run_main(d, [], down)
         self.assertEqual(code, 0)
         self.assertTrue(callable(saves[0]))
-        self.assertRegex(buf.getvalue(), r"Positions: .*stopped early \(errors\)")
+        self.assertRegex(buf.getvalue(), r"Positions: .*Stopped early \(errors\)")
 
     def test_main_log_has_no_stop_note_when_all_went_well(self):
         def fake(url):
