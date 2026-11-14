@@ -1254,6 +1254,28 @@ class AppTest(unittest.TestCase):
         self.assertEqual(page.locator("#rsList .rs-row").count(), n)
         self.assertEqual(page.locator(".st-rec").count(), 1 if page.evaluate("!!routeRecommendation") else 0)
 
+    def test_pin_labels_are_readable_in_every_shade_and_theme(self):
+        js = """() => {
+            const cv = document.createElement('canvas'); cv.width = cv.height = 1;
+            const cx = cv.getContext('2d', {willReadFrequently: true});
+            const rgb = (c) => { cx.clearRect(0, 0, 1, 1); cx.fillStyle = '#000'; cx.fillStyle = c; cx.fillRect(0, 0, 1, 1);
+                return [...cx.getImageData(0, 0, 1, 1).data].slice(0, 3); };
+            const lum = ([r, g, b]) => { const f = (v) => (v /= 255) <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+                return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+            return [0, 1, 2].map((n) => { const e = document.querySelector('.st-pin.st-shade-' + n);
+                const cs = getComputedStyle(e), a = lum(rgb(cs.color)), b = lum(rgb(cs.backgroundColor));
+                return [n, (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05), cs.backgroundColor]; });
+        }"""
+        stations = [station("Kaunas, A g. 1", 1.7, 10, 0.5), station("Kaunas, B g. 2", 1.8, 20, 0.5),
+                    station("Kaunas, C g. 3", 1.9, 30, 0.5)]
+        for theme in ("light", "dark"):
+            with self.subTest(theme=theme):
+                page = self.route_with(stations, theme=theme)
+                res = page.evaluate(js)
+                self.assertEqual(len({r[2] for r in res}), 3, res)
+                for n, ratio, _ in res:
+                    self.assertGreaterEqual(ratio, 4.5, "%s shade %d: %.2f" % (theme, n, ratio))
+
     def test_no_pins_without_route(self):
         page = self.open(stations=list(self.stations_trio()))
         self.assertEqual(page.locator(".st-pin").count(), 0)
