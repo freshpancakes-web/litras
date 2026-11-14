@@ -83,6 +83,7 @@ h1 { font-size: 20px; font-weight: 600; letter-spacing: -.01em; line-height: 1.2
 .views a:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
 @media (max-width: 640px) {
   header { flex-wrap: wrap; row-gap: 14px; }
+  header .brand { flex: 1 1 0; }
   .views { order: 3; flex: 1 0 100%; margin-left: 0; }
 }
 :root:not([data-view="plan"]) .plan-only, :root[data-view="plan"] .cost-only { display: none !important; }
@@ -241,6 +242,8 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
 /* Stations on your route */
 .rs[hidden], .rs-rec[hidden], .rs-empty[hidden], #rsShowAll[hidden], #rsNote[hidden] { display: none; }
 .rs { gap: 16px; }
+.rs-net { grid-column: 1 / -1; }
+.rs.no-route .rs-body, .rs:not(.no-route) #rsPrompt { display: none !important; }
 .rs-opts { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 12px 16px; }
 .rs-rec { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 14px 16px; border: 1px solid var(--accent); border-radius: 10px; background: var(--accent-soft); }
 .rs-rec p { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
@@ -383,29 +386,29 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
         <button id="routeBtn" class="primary" type="button">Calculate route</button>
         <span class="msg" id="routeMsg" role="status"></span>
       </div>
-      <div class="row2">
+      <div class="row2 cost-only">
         <label for="distance">Distance (km) <input id="distance" type="number" step="0.1" min="0" value="100"></label>
         <label for="duration">Drive time <input id="duration" type="text" value="" placeholder="From route" readonly></label>
       </div>
-      <div class="hint" id="distHint">Example distance. Calculate a route to fill this in, or type your own.</div>
-      <ol class="legs" id="legs" aria-label="Route legs" hidden></ol>
-      <div class="field-label" id="cycleLabel">Driving type</div>
-      <div class="seg" role="radiogroup" aria-labelledby="cycleLabel">
+      <div class="hint cost-only" id="distHint">Example distance. Calculate a route to fill this in, or type your own.</div>
+      <ol class="legs cost-only" id="legs" aria-label="Route legs" hidden></ol>
+      <div class="field-label cost-only" id="cycleLabel">Driving type</div>
+      <div class="seg cost-only" role="radiogroup" aria-labelledby="cycleLabel">
         <label><input type="radio" name="cycle" value="city"><span>City</span></label>
         <label><input type="radio" name="cycle" value="mixed" checked><span>Mixed</span></label>
         <label><input type="radio" name="cycle" value="highway"><span>Highway</span></label>
       </div>
-      <div class="tripopts">
+      <div class="tripopts cost-only">
         <label class="check" for="roundTrip"><input id="roundTrip" type="checkbox"> Round trip</label>
         <label class="perweek" for="perWeek">Trips per week <input id="perWeek" type="number" step="1" min="0" max="50" placeholder="e.g. 5"></label>
       </div>
-      <div class="actions"><button id="saveTripBtn" class="quiet" type="button" aria-expanded="false" aria-controls="saveTrip">Save this trip</button></div>
-      <form id="saveTrip" class="savebox" hidden>
+      <div class="actions cost-only"><button id="saveTripBtn" class="quiet" type="button" aria-expanded="false" aria-controls="saveTrip">Save this trip</button></div>
+      <form id="saveTrip" class="savebox cost-only" hidden>
         <label for="tripName">Name <input id="tripName" type="text" maxlength="60" required></label>
         <button class="primary" type="submit">Save</button>
         <button id="saveTripCancel" type="button">Cancel</button>
       </form>
-      <details>
+      <details class="cost-only">
         <summary>Routing options</summary>
         <div class="stack">
           <label for="orsKey">OpenRouteService key (optional)
@@ -417,7 +420,7 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
     </section>
 
     <aside class="side" aria-label="Results and map">
-      <section class="results" id="results" aria-labelledby="h-res">
+      <section class="results cost-only" id="results" aria-labelledby="h-res">
         <h2 id="h-res">This trip</h2>
         <div class="hero">
           <div class="cost"><div class="k">Cost</div><div class="v"><span id="rCost">0.00</span><span class="u">EUR</span></div></div>
@@ -441,9 +444,10 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
       <section class="results rs plan-only" id="routeStations" aria-labelledby="h-rs" hidden>
         <div>
           <h2 id="h-rs">Stations on your route</h2>
-          <div class="hint" id="rsSummary" role="status"></div>
+          <div class="hint rs-body" id="rsSummary" role="status"></div>
         </div>
-        <div class="rs-opts">
+        <div class="hint" id="rsPrompt">Enter From and To and press Calculate route to see the stations on your way.</div>
+        <div class="rs-opts rs-body">
           <div>
             <div class="field-label" id="rsDetourLabel">Off route</div>
             <div class="seg" role="radiogroup" aria-labelledby="rsDetourLabel">
@@ -459,19 +463,20 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
               <label><input type="radio" name="stationSort" value="along"><span>Along the route</span></label>
             </div>
           </div>
+          <label for="rsNetwork" class="rs-net">Station network <select id="rsNetwork"></select></label>
         </div>
-        <div class="rs-rec" id="rsRecommend" hidden>
+        <div class="rs-rec rs-body" id="rsRecommend" hidden>
           <p id="rsRecText"></p>
           <button id="rsAddRec" class="primary" type="button">Add as stop</button>
         </div>
-        <div class="msg err" id="rsMsg" role="status"></div>
-        <div class="rs-empty" id="rsEmpty" hidden>
+        <div class="msg err rs-body" id="rsMsg" role="status"></div>
+        <div class="rs-empty rs-body" id="rsEmpty" hidden>
           <span id="rsEmptyText"></span>
           <button id="rsWiden" class="quiet" type="button">Try 5 km</button>
         </div>
-        <ul class="rs-list" id="rsList"></ul>
-        <button id="rsShowAll" class="quiet" type="button" hidden></button>
-        <div class="hint" id="rsNote" hidden>Positions are looked up from addresses, so a few stations can't be shown.</div>
+        <ul class="rs-list rs-body" id="rsList"></ul>
+        <button id="rsShowAll" class="quiet rs-body" type="button" hidden></button>
+        <div class="hint rs-body" id="rsNote" hidden>Positions are looked up from addresses, so a few stations can't be shown.</div>
       </section>
 
       <div class="mapbox">
@@ -512,7 +517,7 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
       </details>
     </section>
 
-    <section class="sec" aria-labelledby="h-price">
+    <section class="sec cost-only" aria-labelledby="h-price">
       <div class="sec-head">
         <h2 id="h-price">Fuel price</h2>
         <span class="pill" id="priceState">bundled</span>
@@ -549,7 +554,7 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
       </details>
     </section>
 
-    <section class="sec" aria-labelledby="h-meas">
+    <section class="sec cost-only" aria-labelledby="h-meas">
       <h2 id="h-meas">Measure consumption</h2>
       <div class="row">
         <label for="mKm">Km since last fill <input id="mKm" type="number" step="0.1" min="0" placeholder="620"></label>
@@ -570,7 +575,7 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
   <footer class="foot">Map data &copy; OpenStreetMap contributors, tiles &copy; CARTO. Fuel prices: Lithuanian Energy Agency (LEA) and the companies operating the stations. Address search by Photon, municipality lookup by Nominatim (OpenStreetMap), routes by OSRM or OpenRouteService. Station positions looked up from addresses with Photon and Nominatim.</footer>
 </div>
 
-<div class="minibar" id="minibar" aria-hidden="true">
+<div class="minibar cost-only" id="minibar" aria-hidden="true">
   <div><b id="miniCost">0.00 EUR</b><span id="miniLitres">0.0 L</span></div>
   <a href="#results" tabindex="-1">Results and map</a>
 </div>
@@ -731,6 +736,10 @@ function loadLea() {
     if (muni.selectedIndex < 0) muni.value = "";
   }
   net.disabled = muni.disabled = !lea;
+  const rsNet = $("rsNetwork");   // Plan ride's copy of the same setting
+  rsNet.innerHTML = net.innerHTML;
+  rsNet.value = net.value;
+  rsNet.disabled = !lea;
 }
 
 function renderStations(rows, field) {
@@ -1419,8 +1428,10 @@ function renderRouteStations() {
   const sec = $("routeStations");
   routeItems = []; routeRecommendation = null; rsShowAll = false;
   $("rsMsg").textContent = "";
+  sec.classList.toggle("no-route", !routeCoords);
   if (!routeCoords || !lea) {
-    sec.hidden = true;
+    sec.hidden = !lea;   // without a route Plan ride shows #rsPrompt instead of the list
+    $("rsList").innerHTML = "";
     if (typeof drawStationPins === "function") drawStationPins(routeItems, routeRecommendation);
     return;
   }
@@ -1629,9 +1640,14 @@ $("routeBtn").addEventListener("click", calculateRoute);
 ["origin", "dest"].forEach((id) => $(id).addEventListener("keydown", (e) => { if (e.key === "Enter" && !$(id).hasAttribute("aria-activedescendant")) calculateRoute(); }));
 ["priceNetwork", "priceMuni"].forEach((id) => $(id).addEventListener("change", (e) => {
   store.set(id === "priceNetwork" ? "fc.priceNet" : "fc.priceMuni", e.target.value);
+  if (id === "priceNetwork") $("rsNetwork").value = e.target.value;
   priceDirty = false; applyPriceToInput();
   if (id === "priceMuni" && e.target.value === MUNI_AUTO && myMuniState !== "found") useMyLocation(false, false);
 }));
+$("rsNetwork").addEventListener("change", (e) => {
+  $("priceNetwork").value = e.target.value;
+  $("priceNetwork").dispatchEvent(new Event("change"));
+});
 document.querySelectorAll('input[name="basis"]').forEach((r) => r.addEventListener("change", () => {
   store.set("fc.basis", r.value); priceDirty = false; applyPriceToInput();
 }));
