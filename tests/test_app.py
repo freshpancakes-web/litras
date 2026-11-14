@@ -76,6 +76,11 @@ REVERSE_REPLY = {"features": [{"geometry": {"coordinates": [25.3, 54.7]}, "prope
     "name": "Cyclocity", "street": "Gediminas Avenue", "city": "Vilnius", "country": "Lithuania"}}]}
 
 
+def municipality_reply(name, country="lt"):
+    """What Nominatim returns at zoom 8: the municipality is in state_district."""
+    return {"address": {"state_district": name, "state": "Test apskritis", "country_code": country}}
+
+
 class AppTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -97,8 +102,10 @@ class AppTest(unittest.TestCase):
     def setUp(self):
         self.contexts = []
         self.tile_urls = []
-        self.routes = {"photon": photon_default, "osrm": osrm_default(), "ors": None, "reverse": REVERSE_REPLY}
+        self.routes = {"photon": photon_default, "osrm": osrm_default(), "ors": None, "reverse": REVERSE_REPLY,
+                       "nominatim": municipality_reply("Kauno miesto savivaldybė")}
         self.reverse_requests = []
+        self.nominatim_requests = []
         self.addCleanup(self.close_contexts)
 
     def close_contexts(self):
@@ -113,6 +120,7 @@ class AppTest(unittest.TestCase):
         self.history = list(history)
         ctx = self.browser.new_context(
             viewport={"width": width, "height": height}, color_scheme=theme, locale="en-GB",
+            service_workers="block",   # after a reload the worker would serve the real prices.js past the mocks
         )
         self.contexts.append(ctx)
         self.context = ctx
@@ -123,11 +131,20 @@ class AppTest(unittest.TestCase):
         ctx.route(re.compile(r"^https://router\.project-osrm\.org/"), self._osrm)
         ctx.route(re.compile(r"^https://api\.openrouteservice\.org/"), self._ors)
         ctx.route(re.compile(r"^https://(tile\.openstreetmap\.org|[^/]*basemaps\.cartocdn\.com)/"), self._tile)
+        ctx.route(re.compile(r"^https://nominatim\.openstreetmap\.org/"), self._nominatim)
         page = ctx.new_page()
         self.page = page
         page.goto(self.base + "/" + PAGE)
         page.wait_for_selector(".leaflet-container")
         return page
+
+    def _nominatim(self, route):
+        self.nominatim_requests.append(route.request.url)
+        reply = self.routes["nominatim"]
+        if reply is None:
+            route.abort()
+        else:
+            self._json(route, reply)
 
     def _config(self, route, key):
         if key is None:
@@ -409,6 +426,161 @@ class AppTest(unittest.TestCase):
         page.click("#saveTripBtn")
         self.assertEqual(self.value("tripName"), "")
 
+    # ----- stations near me -----
+
+    ME = "@me"
+
+    def wait_my_municipality(self, page, name):
+        page.wait_for_function(
+            "(t) => document.querySelector('#priceMuni option').textContent === t", arg="%s (my location)" % name)
+
+    def station_places(self, page):
+        return page.locator("#stationList li small").all_text_contents()
+
+    def test_my_location_is_the_default_and_the_list_keeps_every_choice(self):
+        page = self.open()
+        self.assertEqual(self.value("priceMuni"), self.ME)
+        options = page.locator("#priceMuni option").all_text_contents()
+        self.assertEqual(options[:2], ["My location", "All municipalities"])
+        for name in ("Kauno m. sav.", "Klaipėdos m. sav.", "Vilniaus m. sav.", "Šiaulių m. sav."):
+            self.assertIn(name, options)
+        self.assertEqual(self.value("price"), "1.959")          # all stations until the location is known
+        self.assertTrue(page.locator("#muniNote").is_hidden())
+
+    def test_location_filters_stations_and_price_to_my_municipality(self):
+        page = self.open(geo="allow")
+        self.wait_my_municipality(page, "Kauno m. sav.")
+        self.assertEqual(self.value("priceMuni"), self.ME)
+        self.assertEqual(self.value("price"), "1.999")
+        places = self.station_places(page)
+        self.assertEqual(len(places), 1)
+        self.assertIn("Kauno m. sav.", places[0])
+        self.assertTrue(page.locator("#muniNote").is_hidden())
+        self.assertEqual(len(self.nominatim_requests), 1)
+        self.assertIn("zoom=8", self.nominatim_requests[0])
+
+    def test_lookup_sends_rounded_coordinates(self):
+        page = self.open()
+        url = page.evaluate("municipalityUrl(54.687249, 25.280351)")
+        self.assertIn("lat=54.687&", url)
+        self.assertTrue(url.endswith("lon=25.280"))
+
+    def test_municipality_names_convert_to_lea_names(self):
+        page = self.open()
+        for osm, lea in (("Kauno rajono savivaldybė", "Kauno r. sav."),
+                         ("Vilniaus miesto savivaldybė", "Vilniaus m. sav."),
+                         ("Neringos savivaldybė", "Neringos sav."),
+                         ("Kazlų Rūdos savivaldybė", "Kazlų Rūdos sav.")):
+            self.assertEqual(page.evaluate("(n) => leaMunicipality(n)", osm), lea)
+
+    def test_manual_choice_wins_and_is_remembered(self):
+        page = self.open(geo="allow")
+        self.wait_my_municipality(page, "Kauno m. sav.")
+        page.select_option("#priceMuni", "Šiaulių m. sav.")
+        self.assertEqual(self.value("price"), "1.9")
+        page.reload()
+        page.wait_for_selector(".leaflet-container")
+        self.wait_my_municipality(page, "Kauno m. sav.")
+        self.assertEqual(self.value("priceMuni"), "Šiaulių m. sav.")
+        self.assertEqual(self.value("price"), "1.9")
+        page.select_option("#priceMuni", "")
+        self.assertEqual(self.value("price"), "1.959")
+        page.select_option("#priceMuni", self.ME)
+        self.assertEqual(self.value("price"), "1.999")
+
+    def test_a_city_saved_before_this_feature_is_replaced_once(self):
+        page = self.open()
+        page.evaluate("""() => { localStorage.setItem('fc.priceMuni', JSON.stringify('Šiaulių m. sav.'));
+                                 localStorage.removeItem('fc.nearMe'); }""")
+        page.reload()
+        page.wait_for_selector(".leaflet-container")
+        self.assertEqual(self.value("priceMuni"), self.ME)
+
+    def test_blocked_location_shows_all_with_a_note(self):
+        page = self.open(geo="denied")
+        page.wait_for_selector("#muniNote:not([hidden])")
+        self.assertIn("Location is off", self.text("muniNote"))
+        self.assertEqual(self.value("price"), "1.959")
+        self.assertEqual(len(self.station_places(page)), 4)
+        self.assertEqual(self.nominatim_requests, [])
+        page.reload()                                         # not asked again, and the note is still there
+        page.wait_for_selector("#muniNote:not([hidden])")
+        self.assertEqual(page.evaluate("window.__geo.calls"), 0)
+
+    def test_outside_lithuania_shows_all_with_a_note(self):
+        self.routes["nominatim"] = {"address": {"city": "Ryga", "country_code": "lv"}}
+        page = self.open(geo="allow")
+        page.wait_for_selector("#muniNote:not([hidden])")
+        self.assertIn("isn't in a Lithuanian municipality", self.text("muniNote"))
+        self.assertEqual(self.value("price"), "1.959")
+        self.assertIsNone(page.evaluate("localStorage.getItem('fc.lastMuni')"))
+
+    def test_unknown_municipality_name_shows_all_with_a_note(self):
+        self.routes["nominatim"] = municipality_reply("Nežinomos savivaldybė")
+        page = self.open(geo="allow")
+        page.wait_for_selector("#muniNote:not([hidden])")
+        self.assertEqual(self.value("price"), "1.959")
+        self.assertEqual(len(self.station_places(page)), 4)
+
+    def test_failed_lookup_shows_all_with_a_note(self):
+        self.routes["nominatim"] = None
+        page = self.open(geo="allow")
+        page.wait_for_selector("#muniNote:not([hidden])")
+        self.assertIn("could not be found", self.text("muniNote"))
+        self.assertEqual(self.value("price"), "1.959")
+
+    def test_failed_lookup_keeps_the_last_municipality(self):
+        page = self.open(geo="allow")
+        self.wait_my_municipality(page, "Kauno m. sav.")
+        self.routes["nominatim"] = None
+        page.reload()
+        page.wait_for_selector(".leaflet-container")
+        page.wait_for_function("window.__geo.calls === 1")
+        page.wait_for_timeout(300)
+        self.assertEqual(self.value("price"), "1.999")
+        self.assertTrue(page.locator("#muniNote").is_hidden())
+        self.assertEqual(page.evaluate("JSON.parse(localStorage.getItem('fc.lastMuni'))"), "Kauno m. sav.")
+
+    def test_no_station_for_the_fuel_nearby_falls_back_to_all(self):
+        self.routes["nominatim"] = municipality_reply("Šiaulių miesto savivaldybė")
+        page = self.open(geo="allow")
+        self.wait_my_municipality(page, "Šiaulių m. sav.")
+        self.assertEqual(self.value("price"), "1.9")
+        self.add_car(page, "Test LPG", "lpg")
+        self.assertEqual(self.value("price"), "0.899")
+        self.assertIn("No station in Šiaulių m. sav.", self.text("muniNote"))
+        self.assertEqual(len(self.station_places(page)), 1)
+
+    def test_typing_in_from_does_not_stop_the_municipality_lookup(self):
+        page = self.open(geo="hold")
+        page.fill("#origin", "Kaun")
+        page.evaluate("window.__geo.answer()")
+        self.wait_my_municipality(page, "Kauno m. sav.")
+        self.assertEqual(self.value("origin"), "Kaun")
+
+    def test_picking_my_location_asks_again_after_a_refusal(self):
+        page = self.open(geo="denied")
+        page.wait_for_selector("#muniNote:not([hidden])")
+        page.select_option("#priceMuni", "Šiaulių m. sav.")
+        self.assertTrue(page.locator("#muniNote").is_hidden())
+        page.evaluate("window.__geo.mode = 'allow'")
+        page.select_option("#priceMuni", self.ME)
+        self.wait_my_municipality(page, "Kauno m. sav.")
+        self.assertEqual(self.value("price"), "1.999")
+        self.assertEqual(self.value("origin"), "")             # the filter never fills in From
+
+    def test_use_my_location_button_also_finds_the_municipality(self):
+        page = self.open(geo="denied")
+        page.wait_for_selector("#muniNote:not([hidden])")
+        page.evaluate("window.__geo.mode = 'allow'")
+        page.click("#useLocation")
+        self.wait_my_municipality(page, "Kauno m. sav.")
+        self.assertTrue(page.locator("#muniNote").is_hidden())
+
+    def test_credits_name_the_lookup_service(self):
+        page = self.open()
+        self.assertIn("Nominatim", page.inner_text("footer"))
+
     # ----- price trend -----
 
     TREND = [
@@ -612,7 +784,8 @@ class AppTest(unittest.TestCase):
     def test_touch_shows_the_tip(self):
         self.tile_urls = []
         self.history = list(self.TREND)
-        ctx = self.browser.new_context(viewport={"width": 390, "height": 844}, has_touch=True, locale="en-GB")
+        ctx = self.browser.new_context(viewport={"width": 390, "height": 844}, has_touch=True, locale="en-GB",
+                                       service_workers="block")
         self.contexts.append(ctx)
         ctx.route(re.compile(r"/config\.js(\?.*)?$"), lambda r: self._config(r, None))
         ctx.route(re.compile(r"/prices\.js(\?.*)?$"), lambda r: self._prices(r, "fixture"))
