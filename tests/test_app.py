@@ -1431,6 +1431,13 @@ class AppTest(unittest.TestCase):
         self.assertEqual(size[0], size[2])
         self.assertEqual(size[1], size[3])
 
+    def test_site_address_with_plan_hash_opens_plan_ride(self):
+        page = self.open(stations=list(self.stations_trio()))
+        page.goto(self.base + "/index.html#plan")
+        page.wait_for_selector(".leaflet-container")
+        self.assertTrue(page.url.endswith("/fuel-calculator.html#plan"), page.url)
+        self.assertEqual(page.evaluate("document.documentElement.dataset.view"), "plan")
+
     def test_unknown_hash_shows_trip_cost(self):
         page = self.open(stations=list(self.stations_trio()))
         page.evaluate("location.hash = '#Plan'")
