@@ -43,6 +43,24 @@ def photon_default(q):
     }]}
 
 
+# A straight route east along latitude 54.9 (the route of tests/test_route_stations.py), as OSRM sends it: [lng, lat].
+KM_LAT, KM_LNG, ROUTE_LAT = 110.57, 64.0, 54.9
+
+
+def osrm_straight():
+    return {"code": "Ok", "routes": [{
+        "distance": 90000, "duration": 4000,
+        "geometry": {"type": "LineString", "coordinates": [[23.9, ROUTE_LAT], [25.3, ROUTE_LAT]]},
+        "legs": [{"distance": 90000, "duration": 4000}],
+    }]}
+
+
+def station(addr, price, along_km, off_km, c="Test Oil", field="p"):
+    """A station along_km east of the route start and off_km north of the route."""
+    return {"c": c, "m": "Kauno m. sav.", "a": addr, field: price,
+            "g": [round(ROUTE_LAT + off_km / KM_LAT, 5), round(23.9 + along_km / KM_LNG, 5)]}
+
+
 def osrm_default():
     return osrm_legs([(100000, 4200)])
 
@@ -106,6 +124,7 @@ class AppTest(unittest.TestCase):
                        "nominatim": municipality_reply("Kauno miesto savivaldybė")}
         self.reverse_requests = []
         self.nominatim_requests = []
+        self.osrm_requests = []
         self.addCleanup(self.close_contexts)
 
     def close_contexts(self):
@@ -114,10 +133,11 @@ class AppTest(unittest.TestCase):
 
     # ----- helpers -----
 
-    def open(self, theme="light", width=1280, height=900, key=None, prices="fixture", history=(), geo="hold"):
+    def open(self, theme="light", width=1280, height=900, key=None, prices="fixture", history=(), geo="hold", stations=None):
         """Open the app in a fresh browser context with the outside services mocked."""
         self.tile_urls = []
         self.history = list(history)
+        self.stations = stations
         ctx = self.browser.new_context(
             viewport={"width": width, "height": height}, color_scheme=theme, locale="en-GB",
             service_workers="block",   # after a reload the worker would serve the real prices.js past the mocks
@@ -161,6 +181,11 @@ class AppTest(unittest.TestCase):
             day = datetime.date.today() - datetime.timedelta(days=5 if mode == "old" else 0)
             body = f.read().replace("__TODAY__", day.isoformat())
         body = body.replace('"history": []', '"history": ' + json.dumps(self.history))
+        if getattr(self, "stations", None) is not None:
+            start, end = body.index("{"), body.rindex("}") + 1
+            data = json.loads(body[start:end])
+            data["stations"] = self.stations
+            body = "window.FUEL_PRICES = " + json.dumps(data) + ";"
         route.fulfill(content_type="text/javascript; charset=utf-8", body=body)
 
     def _json(self, route, data, status=200):
@@ -183,6 +208,7 @@ class AppTest(unittest.TestCase):
         self._json(route, handler(q) if callable(handler) else handler)
 
     def _osrm(self, route):
+        self.osrm_requests.append(route.request.url)
         self._json(route, self.routes["osrm"])
 
     def _ors(self, route):
@@ -976,6 +1002,186 @@ class AppTest(unittest.TestCase):
         regs = page.evaluate("navigator.serviceWorker ? navigator.serviceWorker.getRegistrations().then(r => r.length, () => 0) : 0")
         self.assertEqual(regs, 0)
         self.assertEqual(errors, [])
+
+    # ----- stations on the route -----
+
+    REC_TEXT = ("Cheapest stop on your way: Test Oil, Kaunas. 1.800 EUR/l, about 0.5 km off route. "
+                "A 50 L fill saves about 2.37 EUR against the average on your route.")
+
+    def stations_trio(self):
+        a = station("Kaunas, Savanorių pr. 1", 1.8, 10, 0.5)
+        b = station("Jonava, Kauno g. 2", 1.7, 40, 3)
+        c = station("Kėdainiai, Vilniaus g. 3", 1.9, 60, 0.2, c="Viada")
+        return a, b, c
+
+    def route_with(self, stations, **kw):
+        page = self.open(stations=stations, **kw)
+        self.routes["osrm"] = osrm_straight()
+        page.fill("#origin", "Vilnius")
+        page.fill("#dest", "Kaunas")
+        page.click("#routeBtn")
+        page.wait_for_selector("#routeMsg.ok")
+        return page
+
+    def test_hidden_without_route(self):
+        page = self.open(stations=list(self.stations_trio()))
+        self.assertTrue(page.locator("#routeStations").is_hidden())
+
+    def test_list_shows_stations_within_2_km(self):
+        page = self.route_with(list(self.stations_trio()))
+        self.assertTrue(page.locator("#routeStations").is_visible())
+        rows = page.locator("#rsList .rs-row")
+        self.assertEqual(rows.count(), 2)
+        first = rows.nth(0).inner_text()
+        self.assertIn("1.800", first)
+        self.assertIn("Test Oil", first)
+        self.assertIn("Savanorių pr. 1", first)
+        self.assertIn("at 10 km, about 0.5 km off route", first)
+
+    def test_detour_5_km_adds_station(self):
+        page = self.route_with(list(self.stations_trio()))
+        page.locator('label:has(input[name="detourKm"][value="5"])').click()
+        rows = page.locator("#rsList .rs-row")
+        self.assertEqual(rows.count(), 3)
+        self.assertIn("1.700", rows.nth(0).inner_text())
+
+    def test_sort_along_the_route(self):
+        page = self.route_with(list(self.stations_trio()))
+        page.locator('label:has(input[name="stationSort"][value="along"])').click()
+        rows = page.locator("#rsList .rs-row")
+        self.assertIn("at 10 km", rows.nth(0).inner_text())
+        self.assertIn("at 60 km", rows.nth(1).inner_text())
+
+    def test_recommendation_text(self):
+        page = self.route_with(list(self.stations_trio()))
+        self.assertEqual(self.text("rsRecText"), self.REC_TEXT)
+        self.assertTrue(page.locator("#rsAddRec").is_visible())
+
+    def test_no_recommendation_text(self):
+        a, _, c = self.stations_trio()
+        c["p"] = 1.805
+        page = self.route_with([a, c])
+        self.assertEqual(self.text("rsRecText"),
+                         "Prices on your route are within a few cents of each other, so any station will do.")
+        self.assertTrue(page.locator("#rsAddRec").is_hidden())
+
+    def test_add_as_stop_inserts_and_recalculates(self):
+        a, b, c = self.stations_trio()
+        page = self.route_with([a, b, c])
+        page.click("#rsAddRec")
+        page.wait_for_function("document.getElementById('stop1In') && document.getElementById('stop1In').value")
+        self.assertTrue(self.value("stop1In").startswith("Test Oil"))
+        page.wait_for_function("document.getElementById('routeBtn').disabled === false")
+        self.assertEqual(len(self.osrm_requests), 2)
+        self.assertIn("%s,%s" % (a["g"][1], a["g"][0]), self.osrm_requests[-1])
+
+    def test_add_as_stop_goes_between_existing_stops(self):
+        a, b, c = self.stations_trio()
+        page = self.open(stations=[a, b, c])
+        self.routes["osrm"] = osrm_straight()
+        page.fill("#origin", "Vilnius")
+        page.fill("#dest", "Kaunas")
+        page.click("#addStop")
+        page.fill("#stop1In", "Kedainiai")     # Photon puts every place at lat 54.9, lng 24.0 + len/100
+        page.click("#routeBtn")
+        page.wait_for_selector("#routeMsg.ok")
+        page.click("#rsAddRec")
+        page.wait_for_function("document.querySelectorAll('#stops .stoprow').length === 2")
+        inputs = page.locator("#stops input")
+        self.assertTrue(inputs.nth(0).input_value().startswith("Test Oil"))
+        self.assertTrue(inputs.nth(1).input_value().startswith("Kedainiai"))
+
+    def test_stop_limit_message(self):
+        page = self.open(stations=list(self.stations_trio()))
+        self.routes["osrm"] = osrm_straight()
+        for _ in range(8):
+            page.click("#addStop")
+        page.fill("#origin", "Vilnius")
+        page.fill("#dest", "Kaunas")
+        page.click("#routeBtn")
+        page.wait_for_selector("#routeMsg.ok")
+        page.click("#rsAddRec")
+        self.assertEqual(self.text("rsMsg"), "A trip can have up to 8 stops.")
+        self.assertEqual(page.locator("#stops .stoprow").count(), 8)
+
+    def test_empty_state_and_widen(self):
+        page = self.route_with(list(self.stations_trio()))
+        self.add_car(page, "Test LPG", "lpg")
+        self.assertTrue(page.locator("#rsEmpty").is_visible())
+        self.assertEqual(self.text("rsEmpty").splitlines()[0],
+                         "No stations with a known position within 2 km of this route.")
+        self.assertTrue(page.locator("#rsList .rs-row").count() == 0)
+        page.click("#rsWiden")
+        self.assertTrue(page.locator('input[name="detourKm"][value="5"]').is_checked())
+        self.assertIn("within 5 km", self.text("rsEmpty"))
+        self.assertTrue(page.locator("#rsWiden").is_hidden())
+
+    def test_show_all_after_10(self):
+        many = [station("Town%d, Street 1" % i, round(1.8 + i / 1000, 3), 5 + i, 0.3) for i in range(14)]
+        page = self.route_with(many)
+        self.assertEqual(page.locator("#rsList .rs-row").count(), 10)
+        self.assertEqual(self.text("rsShowAll"), "Show all 14")
+        page.click("#rsShowAll")
+        self.assertEqual(page.locator("#rsList .rs-row").count(), 14)
+        self.assertTrue(page.locator("#rsShowAll").is_hidden())
+
+    def test_manual_distance_hides_section(self):
+        page = self.route_with(list(self.stations_trio()))
+        page.fill("#distance", "80")
+        self.assertTrue(page.locator("#routeStations").is_hidden())
+
+    def test_route_error_hides_section(self):
+        page = self.route_with(list(self.stations_trio()))
+        self.routes["osrm"] = {"code": "NoRoute", "message": "No driving route found."}
+        page.click("#routeBtn")
+        page.wait_for_selector("#routeMsg.err")
+        self.assertTrue(page.locator("#routeStations").is_hidden())
+
+    def test_no_positions_message(self):
+        a, b, c = self.stations_trio()
+        for s in (a, b, c):
+            del s["g"]
+        page = self.route_with([a, b, c])
+        self.assertIn("Station positions aren't available yet.", self.text("rsEmpty"))
+        self.assertTrue(page.locator("#rsList .rs-row").count() == 0)
+
+    def test_coverage_note(self):
+        page = self.route_with(list(self.stations_trio()))
+        self.assertEqual(self.text("rsNote"), "Positions are looked up from addresses, so a few stations can't be shown.")
+
+    def test_network_filter_applies(self):
+        page = self.route_with(list(self.stations_trio()))
+        page.select_option("#priceNetwork", "Viada")
+        rows = page.locator("#rsList .rs-row")
+        self.assertEqual(rows.count(), 1)
+        self.assertIn("Viada", rows.nth(0).inner_text())
+
+    def test_many_stations_render_quickly(self):
+        many = [station("Town%d, Street 1" % i, round(1.7 + (i % 50) / 100, 3), (i * 90 / 500), (i % 40) / 10)
+                for i in range(500)]
+        page = self.route_with(many)
+        ms = page.evaluate("() => { const t = performance.now(); renderRouteStations(); return performance.now() - t; }")
+        self.assertLess(ms, 300)
+
+    def test_choices_are_remembered(self):
+        page = self.route_with(list(self.stations_trio()))
+        page.locator('label:has(input[name="detourKm"][value="5"])').click()
+        page.locator('label:has(input[name="stationSort"][value="along"])').click()
+        self.assertEqual(page.evaluate("localStorage.getItem('fc.detourKm')"), '"5"')
+        self.assertEqual(page.evaluate("localStorage.getItem('fc.stationSort')"), '"along"')
+        page.reload()
+        page.wait_for_selector(".leaflet-container")
+        self.assertTrue(page.locator('input[name="detourKm"][value="5"]').is_checked())
+        self.assertTrue(page.locator('input[name="stationSort"][value="along"]').is_checked())
+
+    def test_section_fits_a_phone(self):
+        for theme in ("light", "dark"):
+            with self.subTest(theme=theme):
+                many = [station("Town%d, A very long street name that keeps going 1" % i, 1.8 + i / 1000, 5 + i, 0.3,
+                                c="A long network name") for i in range(12)]
+                page = self.route_with(many, theme=theme, width=360)
+                self.assertTrue(page.locator("#routeStations").is_visible())
+                self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth"), 360)
 
     # ----- secrets -----
 
