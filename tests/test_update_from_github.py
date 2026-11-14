@@ -76,6 +76,23 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(read(os.path.join(self.clone, "prices.js")), prices("2026-10-29"))
         self.assertEqual(git(self.clone, "status", "--porcelain"), "")
 
+    def test_pulls_over_a_hand_edited_station_coords(self):
+        coords = os.path.join(self.clone, "station-coords.json")
+        write(os.path.join(self.pusher, "station-coords.json"), '{"A": {"g": null, "checked": "2026-10-01"}}\n')
+        git(self.pusher, "add", "station-coords.json")
+        git(self.pusher, "commit", "-m", "coords")
+        git(self.pusher, "push", "origin", "main")
+        git(self.clone, "pull", "--ff-only", "origin", "main")
+        write(coords, '{"A": {"g": [54.1, 23.1], "checked": "2026-11-14"}}\n')   # a hand run of update_prices.py
+        write(os.path.join(self.pusher, "station-coords.json"), '{"B": {"g": null, "checked": "2026-10-02"}}\n')
+        git(self.pusher, "commit", "-am", "more coords")
+        self.push_new_prices()
+        r, out = self.run_script()
+        self.assertEqual(r.returncode, 0, out)
+        self.assertEqual(read(os.path.join(self.clone, "prices.js")), prices("2026-10-29"))
+        self.assertIn('"B"', read(coords))
+        self.assertEqual(git(self.clone, "status", "--porcelain"), "")
+
     def test_keeps_local_commit(self):
         write(os.path.join(self.clone, "notes.txt"), "mine\n")
         git(self.clone, "add", "notes.txt")

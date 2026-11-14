@@ -33,14 +33,14 @@ Once opened online, the page opens offline too. Offline, the calculator, your ca
 | `station-coords.json` | Map positions looked up from station addresses (OpenStreetMap), written by `update_prices.py`. Don't edit it by hand. |
 | `update_prices.py` | Finds LEA's newest Excel file, downloads it and writes `prices.js`, keeping about a year of history across files. `--no-geocode` skips looking up positions. `--check-fresh` fails if the prices are more than 7 days old. Python 3 standard library only. |
 | `schedule_prices.sh` | Optional: installs a macOS job that runs `update_from_github.sh` on weekdays at 10:45, 12:00 and 15:00. |
-| `update_from_github.sh` | Asks GitHub to refresh the prices, waits up to 3 minutes, then pulls them into this folder (only on `main`, fast-forward only; it discards nothing except local changes to `prices.js`). |
+| `update_from_github.sh` | Asks GitHub to refresh the prices, waits up to 3 minutes, then pulls them into this folder (only on `main`, fast-forward only; it discards nothing except local changes to `prices.js` and `station-coords.json`). |
 | `.github/workflows/update-prices.yml` | Runs the updater on GitHub on weekdays and commits prices only when their date is later than the current file's (or when new station positions were found). |
 | `config.js` | Optional and not in the repository: `window.FC_CONFIG = { cartoKey: "..." }` for a CARTO basemaps key. |
 
 ## How prices stay fresh
 GitHub Actions builds `prices.js` and commits it; the hosted page serves that file. GitHub's own schedule runs four times a day on weekdays, but GitHub can start scheduled runs hours late. To be faster, the optional Mac job (`bash schedule_prices.sh`) triggers the same workflow at 10:45, 12:00 and 15:00 and pulls the result, so it needs the GitHub CLI (`gh`) signed in.
 
-The same job looks up map positions for station addresses (at most 900 a day, about 1 per 2 seconds) and keeps them in `station-coords.json`, so each address is looked up once; addresses that can't be found are tried again after 30 days. A same-day run is kept when it adds positions.
+The same job looks up map positions for station addresses (at most 900 per run, about 1 per 2 seconds) and keeps them in `station-coords.json`, so each address is looked up once; addresses that can't be found are tried again after 30 days. A same-day run is kept when it adds positions.
 
 The hosted page therefore gets the day's prices at about 10:45 only when the Mac is awake then. Otherwise it gets them when GitHub's schedule runs, which may be later.
 

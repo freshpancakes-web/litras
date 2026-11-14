@@ -1,7 +1,7 @@
 #!/bin/bash
-# Asks GitHub to refresh prices.js, waits for the result, and pulls it into this folder.
+# Asks GitHub to refresh prices.js and station-coords.json, waits for the result, and pulls it into this folder.
 # Run by the launchd job installed with schedule_prices.sh. Safe to run by hand.
-# It never discards anything except local changes to prices.js (a generated file),
+# It never discards anything except local changes to prices.js and station-coords.json (generated files),
 # and it only touches the checkout when it is on the main branch.
 #
 # Test overrides: FC_GH (path to gh), FC_WAIT_ROUNDS (default 6), FC_WAIT_SECONDS (default 30).
@@ -61,7 +61,10 @@ main() {
     return 0
   fi
 
-  git checkout -- prices.js >/dev/null 2>&1
+  # one call per file: a file git doesn't know (yet) must not stop the other from being restored
+  for generated in prices.js station-coords.json; do
+    git checkout -- "$generated" >/dev/null 2>&1
+  done
   local out
   if out="$(git pull --ff-only origin main 2>&1)"; then
     log "Pulled from GitHub. Prices are dated $(price_date < prices.js)."
