@@ -24,6 +24,7 @@ permissions:
 jobs:
   update:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -33,19 +34,22 @@ jobs:
           python3 update_prices.py
           after=$(grep -o '"date":"[0-9-]*"' prices.js | head -1 | cut -d'"' -f4)
           echo "before=$before after=$after"
-          # Only keep the new file when its date is later, so an older file never replaces a newer one.
-          if [[ ! "$after" > "$before" ]]; then
+          # Keep the new file when its date is later, so an older file never replaces a newer one.
+          # An equal date is kept too when new station positions were found (station-coords.json changed).
+          if [[ "$after" > "$before" ]] || { [[ "$after" == "$before" ]] && ! git diff --quiet -- station-coords.json; }; then
+            echo "Keeping the new files."
+          else
             echo "No newer price date yet, nothing to commit."
-            git checkout -- prices.js
+            git checkout -- prices.js station-coords.json
           fi
         shell: bash
 
       - name: Commit new prices
         run: |
-          if git diff --quiet -- prices.js; then exit 0; fi
+          if git diff --quiet -- prices.js station-coords.json; then exit 0; fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add prices.js
+          git add prices.js station-coords.json
           git commit -m "Update fuel prices to $(grep -o '"date":"[0-9-]*"' prices.js | head -1 | cut -d'"' -f4)"
           git pull --rebase origin main
           git push
