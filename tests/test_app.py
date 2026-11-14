@@ -1075,6 +1075,13 @@ class AppTest(unittest.TestCase):
         self.assertEqual(len(self.osrm_requests), 2)
         self.assertIn("%s,%s" % (a["g"][1], a["g"][0]), self.osrm_requests[-1])
 
+    def test_row_click_does_not_change_the_trip(self):
+        page = self.route_with(list(self.stations_trio()))
+        page.click("#rsList .rs-row >> nth=0")
+        page.wait_for_timeout(300)
+        self.assertEqual(page.locator("#stops .stoprow").count(), 0)
+        self.assertEqual(len(self.osrm_requests), 1)
+
     def test_add_as_stop_goes_between_existing_stops(self):
         a, b, c = self.stations_trio()
         page = self.open(stations=[a, b, c])

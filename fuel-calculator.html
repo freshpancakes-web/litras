@@ -1433,7 +1433,7 @@ function drawRouteStationRows() {
     const b = document.createElement("button");
     b.type = "button"; b.className = "rs-row" + (rec && rec.item === it ? " rec" : "");
     b.dataset.i = routeItems.indexOf(it);
-    b.setAttribute("aria-label", "Add " + it.station.c + ", " + it.station.a + " as a stop");
+    b.setAttribute("aria-label", it.station.c + ", " + it.station.a + ", " + fmt(it.price, 3) + " EUR/l");
     const p = document.createElement("span"); p.className = "p"; p.textContent = fmt(it.price, 3);
     const t = document.createElement("span"); t.textContent = it.station.c;
     const small = document.createElement("small"); small.textContent = it.station.a;
@@ -1476,7 +1476,7 @@ function addStationStop(item) {
 $("rsAddRec").addEventListener("click", () => { if (routeRecommendation) addStationStop(routeRecommendation.item); });
 $("rsList").addEventListener("click", (e) => {
   const b = e.target.closest(".rs-row");
-  if (b && routeItems[b.dataset.i]) addStationStop(routeItems[b.dataset.i]);
+  if (b && routeItems[b.dataset.i] && typeof focusStationPin === "function") focusStationPin(routeItems[b.dataset.i]);
 });
 $("rsShowAll").addEventListener("click", () => { rsShowAll = true; drawRouteStationRows(); });
 $("rsWiden").addEventListener("click", () => {
