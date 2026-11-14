@@ -114,6 +114,38 @@ class RouteStationsTest(unittest.TestCase):
         by_price = self.page.evaluate("([i]) => RouteStations.sortItems(i, 'price')", [items])
         self.assertEqual([i["price"] for i in by_price], [1.7, 1.9])
 
+    PERF_JS = """() => {
+        const route = [];
+        for (let i = 0; i < 7000; i++) route.push([54.2 + i * 0.0001 + Math.sin(i / 50) * 0.01, 23.0 + i * 0.0006]);
+        const stations = [];
+        for (let i = 0; i < 700; i++) {
+            const r = route[(i * 10) % 7000];
+            stations.push({c: "X", m: "Y", a: "Town, Street " + i, p: 1.7 + (i % 40) / 100,
+                           g: [r[0] + ((i % 7) - 3) / 400, r[1] + ((i % 5) - 2) / 400]});
+        }
+        const t = performance.now();
+        const out = RouteStations.corridor(stations, route, {field: "p", maxOffKm: 2});
+        return [performance.now() - t, out.length];
+    }"""
+
+    def test_corridor_is_fast_on_a_long_route(self):
+        self.page.evaluate(self.PERF_JS)   # warm up
+        ms, n = min((self.page.evaluate(self.PERF_JS) for _ in range(3)), key=lambda r: r[0])
+        self.assertGreater(n, 100)
+        print("corridor 700 stations x 7000 points: %.1f ms" % ms)
+        self.assertLess(ms, 40)
+
+    def test_project_wrapper_matches_corridor(self):
+        got = self.page.evaluate("""() => {
+            const route = [[54.9, 23.9], [55.0, 24.3], [54.8, 24.9]];
+            const s = {c: "X", m: "Y", a: "A", p: 1.5, g: [54.95, 24.2]};
+            const c = RouteStations.corridor([s], route, {field: "p", maxOffKm: 50})[0];
+            const p = RouteStations.project(route, s.g);
+            return [c.offKm, p.offKm, c.alongKm, p.alongKm];
+        }""")
+        self.assertEqual(got[0], got[1])
+        self.assertEqual(got[2], got[3])
+
 
 if __name__ == "__main__":
     unittest.main()
