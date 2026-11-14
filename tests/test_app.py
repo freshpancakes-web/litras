@@ -133,7 +133,7 @@ class AppTest(unittest.TestCase):
 
     # ----- helpers -----
 
-    def open(self, theme="light", width=1280, height=900, key=None, prices="fixture", history=(), geo="hold", stations=None):
+    def open(self, theme="light", width=1280, height=900, key=None, prices="fixture", history=(), geo="hold", stations=None, view=None):
         """Open the app in a fresh browser context with the outside services mocked."""
         self.tile_urls = []
         self.history = list(history)
@@ -154,7 +154,7 @@ class AppTest(unittest.TestCase):
         ctx.route(re.compile(r"^https://nominatim\.openstreetmap\.org/"), self._nominatim)
         page = ctx.new_page()
         self.page = page
-        page.goto(self.base + "/" + PAGE)
+        page.goto(self.base + "/" + PAGE + ("#plan" if view == "plan" else ""))
         page.wait_for_selector(".leaflet-container")
         return page
 
@@ -1008,14 +1008,19 @@ class AppTest(unittest.TestCase):
     REC_TEXT = ("Cheapest stop on your way: Test Oil, Kaunas. 1.800 EUR/l, about 0.5 km off route. "
                 "A 50 L fill saves about 2.37 EUR against the average on your route.")
 
+    def switch(self, page, view):
+        """Click the header switch; hashchange arrives a task later, so wait for the view to apply."""
+        page.click("#viewPlan" if view == "plan" else "#viewCost")
+        page.wait_for_function("document.documentElement.dataset.view === '%s'" % view)
+
     def stations_trio(self):
         a = station("Kaunas, Savanorių pr. 1", 1.8, 10, 0.5)
         b = station("Jonava, Kauno g. 2", 1.7, 40, 3)
         c = station("Kėdainiai, Vilniaus g. 3", 1.9, 60, 0.2, c="Viada")
         return a, b, c
 
-    def route_with(self, stations, **kw):
-        page = self.open(stations=stations, **kw)
+    def route_with(self, stations, view="plan", **kw):
+        page = self.open(stations=stations, view=view, **kw)
         self.routes["osrm"] = osrm_straight()
         page.fill("#origin", "Vilnius")
         page.fill("#dest", "Kaunas")
@@ -1023,9 +1028,18 @@ class AppTest(unittest.TestCase):
         page.wait_for_selector("#routeMsg.ok")
         return page
 
+    PROMPT = "Enter From and To and press Calculate route to see the stations on your way."
+
+    def assert_prompt(self, page):
+        self.assertTrue(page.locator("#rsPrompt").is_visible())
+        self.assertEqual(self.text("rsPrompt"), self.PROMPT)
+        self.assertEqual(page.locator("#rsList .rs-row").count(), 0)
+        self.assertEqual(page.locator(".st-pin").count(), 0)
+        self.assertTrue(page.locator(".rs-opts").is_hidden())
+
     def test_hidden_without_route(self):
-        page = self.open(stations=list(self.stations_trio()))
-        self.assertTrue(page.locator("#routeStations").is_hidden())
+        page = self.open(stations=list(self.stations_trio()), view="plan")
+        self.assert_prompt(page)
 
     def test_list_shows_stations_within_2_km(self):
         page = self.route_with(list(self.stations_trio()))
@@ -1100,8 +1114,7 @@ class AppTest(unittest.TestCase):
         page.wait_for_function("document.getElementById('routeBtn').disabled === false")
         self.assertTrue(page.locator("#routeStations").is_visible())
         page.click("#stops .x")
-        self.assertTrue(page.locator("#routeStations").is_hidden())
-        self.assertEqual(page.locator(".st-pin").count(), 0)
+        self.assert_prompt(page)
 
     def test_row_click_does_not_change_the_trip(self):
         page = self.route_with(list(self.stations_trio()))
@@ -1112,7 +1125,7 @@ class AppTest(unittest.TestCase):
 
     def test_add_as_stop_goes_between_existing_stops(self):
         a, b, c = self.stations_trio()
-        page = self.open(stations=[a, b, c])
+        page = self.open(stations=[a, b, c], view="plan")
         self.routes["osrm"] = osrm_straight()
         page.fill("#origin", "Vilnius")
         page.fill("#dest", "Kaunas")
@@ -1127,7 +1140,7 @@ class AppTest(unittest.TestCase):
         self.assertTrue(inputs.nth(1).input_value().startswith("Kedainiai"))
 
     def test_stop_limit_message(self):
-        page = self.open(stations=list(self.stations_trio()))
+        page = self.open(stations=list(self.stations_trio()), view="plan")
         self.routes["osrm"] = osrm_straight()
         for _ in range(8):
             page.click("#addStop")
@@ -1161,16 +1174,17 @@ class AppTest(unittest.TestCase):
         self.assertTrue(page.locator("#rsShowAll").is_hidden())
 
     def test_manual_distance_hides_section(self):
-        page = self.route_with(list(self.stations_trio()))
+        page = self.route_with(list(self.stations_trio()), view=None)
         page.fill("#distance", "80")
-        self.assertTrue(page.locator("#routeStations").is_hidden())
+        self.switch(page, "plan")
+        self.assert_prompt(page)
 
     def test_route_error_hides_section(self):
         page = self.route_with(list(self.stations_trio()))
         self.routes["osrm"] = {"code": "NoRoute", "message": "No driving route found."}
         page.click("#routeBtn")
         page.wait_for_selector("#routeMsg.err")
-        self.assertTrue(page.locator("#routeStations").is_hidden())
+        self.assert_prompt(page)
 
     def test_no_positions_message(self):
         a, b, c = self.stations_trio()
@@ -1185,8 +1199,9 @@ class AppTest(unittest.TestCase):
         self.assertEqual(self.text("rsNote"), "Positions are looked up from addresses, so a few stations can't be shown.")
 
     def test_network_filter_applies(self):
-        page = self.route_with(list(self.stations_trio()))
+        page = self.route_with(list(self.stations_trio()), view=None)
         page.select_option("#priceNetwork", "Viada")
+        self.switch(page, "plan")
         rows = page.locator("#rsList .rs-row")
         self.assertEqual(rows.count(), 1)
         self.assertIn("Viada", rows.nth(0).inner_text())
@@ -1217,6 +1232,58 @@ class AppTest(unittest.TestCase):
                 page = self.route_with(many, theme=theme, width=360)
                 self.assertTrue(page.locator("#routeStations").is_visible())
                 self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth"), 360)
+                self.switch(page, "cost")
+                self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth"), 360)
+
+    def test_plan_without_route_fits_a_phone_in_both_themes(self):
+        for theme in ("light", "dark"):
+            with self.subTest(theme=theme):
+                page = self.open(stations=list(self.stations_trio()), view="plan", theme=theme, width=360)
+                self.assert_prompt(page)
+                self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth"), 360)
+
+    def test_phone_plan_view_has_no_cost_bar_and_a_tidy_header(self):
+        page = self.open(stations=list(self.stations_trio()), view="plan", width=360)
+        self.assertTrue(page.locator("#minibar").is_hidden())
+        brand = page.locator(".brand").bounding_box()
+        theme = page.locator("#themeBtn").bounding_box()
+        views = page.locator(".views").bounding_box()
+        self.assertLess(theme["y"], brand["y"] + brand["height"])   # theme switch stays beside the name
+        self.assertGreaterEqual(views["y"], brand["y"] + brand["height"])   # view switch on its own row
+
+    def test_phone_cost_bar_is_resynced_after_a_switch(self):
+        page = self.open(stations=list(self.stations_trio()), width=360)
+        page.evaluate("document.getElementById('minibar').hidden = true")   # a state left over from the other view
+        page.evaluate("location.hash = '#plan'")
+        page.wait_for_function("document.documentElement.dataset.view === 'plan'")
+        page.evaluate("history.back()")
+        page.wait_for_function("document.documentElement.dataset.view === 'cost'")
+        self.assertTrue(page.locator("#minibar").is_visible())   # the results card is below the fold at the top
+
+    def test_plan_view_hides_cost_parts(self):
+        page = self.route_with(list(self.stations_trio()))
+        for sel in ["#results", "#distance", "#distHint", "#saveTripBtn", "#price", "#priceNetwork", "#mKm",
+                    "#cycleLabel", "#perWeek", "#roundTrip", "#orsKey"]:
+            self.assertTrue(page.locator(sel).is_hidden(), sel)
+        for sel in ["#origin", "#dest", "#routeBtn", "#carSelect", "#addStop", "#rsNetwork"]:
+            self.assertTrue(page.locator(sel).is_visible(), sel)
+        self.switch(page, "cost")
+        for sel in ["#results", "#distance", "#saveTripBtn", "#price", "#mKm"]:
+            self.assertTrue(page.locator(sel).is_visible(), sel)
+
+    def test_network_selects_stay_in_sync(self):
+        page = self.route_with(list(self.stations_trio()))
+        page.select_option("#rsNetwork", "Viada")
+        self.assertEqual(self.value("priceNetwork"), "Viada")
+        self.assertEqual(page.evaluate("localStorage.getItem('fc.priceNet')"), '"Viada"')
+        rows = page.locator("#rsList .rs-row").all_inner_texts()
+        self.assertEqual(len(rows), 1)
+        self.assertIn("Viada", rows[0])
+        self.switch(page, "cost")
+        page.select_option("#priceNetwork", "")
+        self.switch(page, "plan")
+        self.assertEqual(self.value("rsNetwork"), "")
+        self.assertEqual(page.locator("#rsList .rs-row").count(), 2)
 
     # ----- price pins -----
 
@@ -1305,12 +1372,70 @@ class AppTest(unittest.TestCase):
                     self.assertGreaterEqual(ratio, 4.5, "%s shade %d: %.2f" % (theme, n, ratio))
 
     def test_no_pins_without_route(self):
-        page = self.open(stations=list(self.stations_trio()))
+        page = self.open(stations=list(self.stations_trio()), view="plan")
         self.assertEqual(page.locator(".st-pin").count(), 0)
         page = self.route_with(list(self.stations_trio()))
         self.assertEqual(page.locator(".st-pin").count(), 2)
+        self.switch(page, "cost")
         page.fill("#distance", "80")
+        self.switch(page, "plan")
         self.assertEqual(page.locator(".st-pin").count(), 0)
+
+    # ----- Trip cost and Plan ride views -----
+
+    def test_cost_view_has_no_stations_or_pins(self):
+        page = self.route_with(list(self.stations_trio()), view=None)
+        self.assertTrue(page.locator("#routeStations").is_hidden())
+        self.assertEqual(page.locator(".st-pin").count(), 0)
+        self.assertEqual(page.get_attribute("#viewCost", "aria-current"), "page")
+
+    def test_switching_to_plan_shows_pins_without_recalculating(self):
+        page = self.route_with(list(self.stations_trio()), view=None)
+        self.switch(page, "plan")
+        page.wait_for_selector(".st-pin")
+        self.assertEqual(page.locator(".st-pin").count(), 2)
+        self.assertTrue(page.locator("#routeStations").is_visible())
+        self.assertEqual(len(self.osrm_requests), 1)
+        self.assertEqual(page.get_attribute("#viewPlan", "aria-current"), "page")
+
+    def test_add_as_stop_then_back_to_trip_cost(self):
+        page = self.route_with(list(self.stations_trio()))
+        page.click("#rsAddRec")
+        page.wait_for_function("document.getElementById('routeBtn').disabled === false")
+        self.switch(page, "cost")
+        self.assertEqual(page.locator("#stops .stoprow").count(), 1)
+        self.assertTrue(page.locator("#results").is_visible())
+        self.assertEqual(page.locator(".st-pin").count(), 0)
+
+    def test_back_button_returns_to_trip_cost(self):
+        page = self.route_with(list(self.stations_trio()), view=None)
+        self.switch(page, "plan")
+        page.wait_for_selector(".st-pin")
+        page.go_back()
+        page.wait_for_function("document.documentElement.dataset.view === 'cost'")
+        self.assertEqual(page.locator(".st-pin").count(), 0)
+
+    def test_open_popup_closes_when_leaving_plan(self):
+        page = self.route_with(list(self.stations_trio()))
+        page.click("#rsList .rs-row >> nth=0")
+        page.wait_for_selector(".leaflet-popup")
+        self.switch(page, "cost")
+        page.wait_for_function("!document.querySelector('.leaflet-popup')", timeout=2000)   # Leaflet fades it out over 200 ms
+
+    def test_map_resizes_after_switch(self):
+        page = self.route_with(list(self.stations_trio()), view=None)
+        self.switch(page, "plan")
+        page.wait_for_timeout(100)
+        size = page.evaluate("[map.getSize().x, map.getSize().y, document.getElementById('map').clientWidth, "
+                             "document.getElementById('map').clientHeight]")
+        self.assertEqual(size[0], size[2])
+        self.assertEqual(size[1], size[3])
+
+    def test_unknown_hash_shows_trip_cost(self):
+        page = self.open(stations=list(self.stations_trio()))
+        page.evaluate("location.hash = '#Plan'")
+        page.wait_for_timeout(50)
+        self.assertEqual(page.evaluate("document.documentElement.dataset.view"), "cost")
 
     # ----- secrets -----
 
