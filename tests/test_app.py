@@ -133,7 +133,7 @@ class AppTest(unittest.TestCase):
 
     # ----- helpers -----
 
-    def open(self, theme="light", width=1280, height=900, key=None, prices="fixture", history=(), geo="hold", stations=None):
+    def open(self, theme="light", width=1280, height=900, key=None, prices="fixture", history=(), geo="hold", stations=None, view=None):
         """Open the app in a fresh browser context with the outside services mocked."""
         self.tile_urls = []
         self.history = list(history)
@@ -154,7 +154,7 @@ class AppTest(unittest.TestCase):
         ctx.route(re.compile(r"^https://nominatim\.openstreetmap\.org/"), self._nominatim)
         page = ctx.new_page()
         self.page = page
-        page.goto(self.base + "/" + PAGE)
+        page.goto(self.base + "/" + PAGE + ("#plan" if view == "plan" else ""))
         page.wait_for_selector(".leaflet-container")
         return page
 
@@ -1014,8 +1014,8 @@ class AppTest(unittest.TestCase):
         c = station("Kėdainiai, Vilniaus g. 3", 1.9, 60, 0.2, c="Viada")
         return a, b, c
 
-    def route_with(self, stations, **kw):
-        page = self.open(stations=stations, **kw)
+    def route_with(self, stations, view="plan", **kw):
+        page = self.open(stations=stations, view=view, **kw)
         self.routes["osrm"] = osrm_straight()
         page.fill("#origin", "Vilnius")
         page.fill("#dest", "Kaunas")
@@ -1024,7 +1024,7 @@ class AppTest(unittest.TestCase):
         return page
 
     def test_hidden_without_route(self):
-        page = self.open(stations=list(self.stations_trio()))
+        page = self.open(stations=list(self.stations_trio()), view="plan")
         self.assertTrue(page.locator("#routeStations").is_hidden())
 
     def test_list_shows_stations_within_2_km(self):
@@ -1112,7 +1112,7 @@ class AppTest(unittest.TestCase):
 
     def test_add_as_stop_goes_between_existing_stops(self):
         a, b, c = self.stations_trio()
-        page = self.open(stations=[a, b, c])
+        page = self.open(stations=[a, b, c], view="plan")
         self.routes["osrm"] = osrm_straight()
         page.fill("#origin", "Vilnius")
         page.fill("#dest", "Kaunas")
@@ -1127,7 +1127,7 @@ class AppTest(unittest.TestCase):
         self.assertTrue(inputs.nth(1).input_value().startswith("Kedainiai"))
 
     def test_stop_limit_message(self):
-        page = self.open(stations=list(self.stations_trio()))
+        page = self.open(stations=list(self.stations_trio()), view="plan")
         self.routes["osrm"] = osrm_straight()
         for _ in range(8):
             page.click("#addStop")
@@ -1305,12 +1305,68 @@ class AppTest(unittest.TestCase):
                     self.assertGreaterEqual(ratio, 4.5, "%s shade %d: %.2f" % (theme, n, ratio))
 
     def test_no_pins_without_route(self):
-        page = self.open(stations=list(self.stations_trio()))
+        page = self.open(stations=list(self.stations_trio()), view="plan")
         self.assertEqual(page.locator(".st-pin").count(), 0)
         page = self.route_with(list(self.stations_trio()))
         self.assertEqual(page.locator(".st-pin").count(), 2)
         page.fill("#distance", "80")
         self.assertEqual(page.locator(".st-pin").count(), 0)
+
+    # ----- Trip cost and Plan ride views -----
+
+    def test_cost_view_has_no_stations_or_pins(self):
+        page = self.route_with(list(self.stations_trio()), view=None)
+        self.assertTrue(page.locator("#routeStations").is_hidden())
+        self.assertEqual(page.locator(".st-pin").count(), 0)
+        self.assertEqual(page.get_attribute("#viewCost", "aria-current"), "page")
+
+    def test_switching_to_plan_shows_pins_without_recalculating(self):
+        page = self.route_with(list(self.stations_trio()), view=None)
+        page.click("#viewPlan")
+        page.wait_for_selector(".st-pin")
+        self.assertEqual(page.locator(".st-pin").count(), 2)
+        self.assertTrue(page.locator("#routeStations").is_visible())
+        self.assertEqual(len(self.osrm_requests), 1)
+        self.assertEqual(page.get_attribute("#viewPlan", "aria-current"), "page")
+
+    def test_add_as_stop_then_back_to_trip_cost(self):
+        page = self.route_with(list(self.stations_trio()))
+        page.click("#rsAddRec")
+        page.wait_for_function("document.getElementById('routeBtn').disabled === false")
+        page.click("#viewCost")
+        self.assertEqual(page.locator("#stops .stoprow").count(), 1)
+        self.assertTrue(page.locator("#results").is_visible())
+        self.assertEqual(page.locator(".st-pin").count(), 0)
+
+    def test_back_button_returns_to_trip_cost(self):
+        page = self.route_with(list(self.stations_trio()), view=None)
+        page.click("#viewPlan")
+        page.wait_for_selector(".st-pin")
+        page.go_back()
+        page.wait_for_function("document.documentElement.dataset.view === 'cost'")
+        self.assertEqual(page.locator(".st-pin").count(), 0)
+
+    def test_open_popup_closes_when_leaving_plan(self):
+        page = self.route_with(list(self.stations_trio()))
+        page.click("#rsList .rs-row >> nth=0")
+        page.wait_for_selector(".leaflet-popup")
+        page.click("#viewCost")
+        page.wait_for_function("!document.querySelector('.leaflet-popup')", timeout=2000)   # Leaflet fades it out over 200 ms
+
+    def test_map_resizes_after_switch(self):
+        page = self.route_with(list(self.stations_trio()), view=None)
+        page.click("#viewPlan")
+        page.wait_for_timeout(100)
+        size = page.evaluate("[map.getSize().x, map.getSize().y, document.getElementById('map').clientWidth, "
+                             "document.getElementById('map').clientHeight]")
+        self.assertEqual(size[0], size[2])
+        self.assertEqual(size[1], size[3])
+
+    def test_unknown_hash_shows_trip_cost(self):
+        page = self.open(stations=list(self.stations_trio()))
+        page.evaluate("location.hash = '#Plan'")
+        page.wait_for_timeout(50)
+        self.assertEqual(page.evaluate("document.documentElement.dataset.view"), "cost")
 
     # ----- secrets -----
 
