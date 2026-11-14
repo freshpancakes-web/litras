@@ -145,6 +145,15 @@ class UpdateCacheTests(unittest.TestCase):
         self.assertEqual(cache, {})
         self.assertEqual(result, {"looked_up": 0, "found": 0, "skipped": 1})
 
+    def test_failures_still_sleep_and_count_toward_limit(self):
+        addrs = ["Town, Street %d, 5325%d" % (i, i) for i in range(5)]
+        get = FakeGet({"photon": OSError("429")})
+        sleeps = []
+        result = gs.update_cache(stations(*addrs), {}, TODAY, get, sleeps.append, limit=2)
+        self.assertEqual(len(get.urls), 2)
+        self.assertEqual(sleeps, [0.5, 0.5])
+        self.assertEqual(result, {"looked_up": 0, "found": 0, "skipped": 2})
+
     def test_duplicate_addresses_are_looked_up_once(self):
         get = FakeGet(dict(GOOD))
         result = gs.update_cache(stations(ADDR, ADDR), {}, TODAY, get, nosleep)

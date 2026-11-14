@@ -39,8 +39,10 @@ def lea_municipality(name):
 
 def _photon_building(query, get, sleep):
     url = PHOTON_URL % urllib.parse.quote(query + ", Lithuania")
-    reply = get(url)
-    sleep(PHOTON_DELAY)
+    try:
+        reply = get(url)
+    finally:
+        sleep(PHOTON_DELAY)
     features = (reply or {}).get("features") or []
     if not features or features[0].get("properties", {}).get("type") != "house":
         return None
@@ -59,8 +61,10 @@ def lookup(address, municipality, get, sleep=time.sleep):
         if found is None:
             continue
         lat, lng = found
-        reply = get(NOMINATIM_URL % (lat, lng))
-        sleep(NOMINATIM_DELAY)
+        try:
+            reply = get(NOMINATIM_URL % (lat, lng))
+        finally:
+            sleep(NOMINATIM_DELAY)
         district = ((reply or {}).get("address") or {}).get("state_district")
         if district and lea_municipality(district) == municipality:
             return [round(lat, 5), round(lng, 5)]
@@ -96,7 +100,7 @@ def _needs_lookup(entry, today):
 
 
 def update_cache(stations, cache, today, get, sleep=time.sleep, limit=MAX_LOOKUPS):
-    looked_up = found = skipped = 0
+    looked_up = found = skipped = attempts = 0
     seen = set()
     for s in stations:
         address = s["a"]
@@ -105,8 +109,9 @@ def update_cache(stations, cache, today, get, sleep=time.sleep, limit=MAX_LOOKUP
         seen.add(address)
         if not _needs_lookup(cache.get(address), today):
             continue
-        if looked_up >= limit:
+        if attempts >= limit:
             break
+        attempts += 1
         try:
             position = lookup(address, s["m"], get, sleep)
         except (OSError, ValueError, KeyError, IndexError, TypeError):
