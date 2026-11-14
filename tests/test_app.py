@@ -1251,6 +1251,15 @@ class AppTest(unittest.TestCase):
         self.assertLess(theme["y"], brand["y"] + brand["height"])   # theme switch stays beside the name
         self.assertGreaterEqual(views["y"], brand["y"] + brand["height"])   # view switch on its own row
 
+    def test_phone_cost_bar_is_resynced_after_a_switch(self):
+        page = self.open(stations=list(self.stations_trio()), width=360)
+        page.evaluate("document.getElementById('minibar').hidden = true")   # a state left over from the other view
+        page.evaluate("location.hash = '#plan'")
+        page.wait_for_function("document.documentElement.dataset.view === 'plan'")
+        page.evaluate("history.back()")
+        page.wait_for_function("document.documentElement.dataset.view === 'cost'")
+        self.assertTrue(page.locator("#minibar").is_visible())   # the results card is below the fold at the top
+
     def test_plan_view_hides_cost_parts(self):
         page = self.route_with(list(self.stations_trio()))
         for sel in ["#results", "#distance", "#distHint", "#saveTripBtn", "#price", "#priceNetwork", "#mKm",

@@ -1564,6 +1564,7 @@ const currentView = () => location.hash === "#plan" ? "plan" : "cost";
 function applyView() {
   const v = currentView();
   document.documentElement.dataset.view = v;
+  syncMinibar();   // the results card moves when the view changes
   [["viewCost", "cost"], ["viewPlan", "plan"]].forEach(([id, name]) => {
     if (name === v) $(id).setAttribute("aria-current", "page"); else $(id).removeAttribute("aria-current");
   });
