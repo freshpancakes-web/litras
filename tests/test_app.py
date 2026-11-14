@@ -1438,6 +1438,32 @@ class AppTest(unittest.TestCase):
         self.assertTrue(page.url.endswith("/fuel-calculator.html#plan"), page.url)
         self.assertEqual(page.evaluate("document.documentElement.dataset.view"), "plan")
 
+    def test_stations_heading_folds_the_section(self):
+        page = self.route_with(list(self.stations_trio()))
+        toggle = page.locator("#rsToggle")
+        self.assertEqual(toggle.get_attribute("aria-expanded"), "true")
+        toggle.click()
+        self.assertEqual(toggle.get_attribute("aria-expanded"), "false")
+        for sel in [".rs-opts", "#rsList", "#rsRecommend", "#rsNote"]:
+            self.assertTrue(page.locator(sel).is_hidden(), sel)
+        self.assertTrue(page.locator("#rsSummary").is_visible())
+        self.assertEqual(page.locator(".st-pin").count(), 2)   # the map keeps its pins
+        page.reload()
+        page.wait_for_selector(".leaflet-container")
+        self.assertEqual(page.get_attribute("#rsToggle", "aria-expanded"), "false")   # remembered
+        self.assertTrue(page.locator("#rsPrompt").is_hidden())   # folded hides the prompt too
+        page.click("#rsToggle")
+        self.assertEqual(page.get_attribute("#rsToggle", "aria-expanded"), "true")
+        self.assertTrue(page.locator("#rsPrompt").is_visible())
+
+    def test_stations_heading_works_with_the_keyboard(self):
+        page = self.route_with(list(self.stations_trio()))
+        page.focus("#rsToggle")
+        page.keyboard.press("Enter")
+        self.assertTrue(page.locator("#rsList").is_hidden())
+        page.keyboard.press("Space")
+        self.assertTrue(page.locator("#rsList").is_visible())
+
     def test_unknown_hash_shows_trip_cost(self):
         page = self.open(stations=list(self.stations_trio()))
         page.evaluate("location.hash = '#Plan'")

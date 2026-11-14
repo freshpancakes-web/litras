@@ -243,6 +243,12 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
 .rs[hidden], .rs-rec[hidden], .rs-empty[hidden], #rsShowAll[hidden], #rsNote[hidden] { display: none; }
 .rs { gap: 16px; }
 .rs-net { grid-column: 1 / -1; }
+.rs-toggle { display: inline-flex; align-items: center; gap: 6px; height: auto; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; text-align: left; }
+.rs-toggle svg { width: 18px; height: 18px; flex: none; color: var(--muted); transition: transform .15s; }
+.rs-toggle[aria-expanded="false"] svg { transform: rotate(-90deg); }
+.rs-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+.rs.collapsed .rs-body:not(#rsSummary), .rs.collapsed #rsPrompt { display: none !important; }
+.rs.collapsed { gap: 4px; }
 .rs.no-route .rs-body, .rs:not(.no-route) #rsPrompt { display: none !important; }
 .rs-opts { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 12px 16px; }
 .rs-rec { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 14px 16px; border: 1px solid var(--accent); border-radius: 10px; background: var(--accent-soft); }
@@ -443,7 +449,7 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
 
       <section class="results rs plan-only" id="routeStations" aria-labelledby="h-rs" hidden>
         <div>
-          <h2 id="h-rs">Stations on your route</h2>
+          <h2 id="h-rs"><button id="rsToggle" class="rs-toggle" type="button" aria-expanded="true">Stations on your route<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button></h2>
           <div class="hint rs-body" id="rsSummary" role="status"></div>
         </div>
         <div class="hint" id="rsPrompt">Enter From and To and press Calculate route to see the stations on your way.</div>
@@ -1416,6 +1422,17 @@ const rsChoice = (name, allowed, fallback) => {
   const v = store.get(name === "detourKm" ? "fc.detourKm" : "fc.stationSort");
   return allowed.includes(String(v)) ? String(v) : fallback;
 };
+// Tapping the heading folds the section away so the map has the room; the pins stay.
+function setStationsFolded(folded) {
+  $("routeStations").classList.toggle("collapsed", folded);
+  $("rsToggle").setAttribute("aria-expanded", String(!folded));
+}
+setStationsFolded(store.get("fc.rsFolded") === true);
+$("rsToggle").addEventListener("click", () => {
+  const folded = $("rsToggle").getAttribute("aria-expanded") === "true";
+  setStationsFolded(folded);
+  store.set("fc.rsFolded", folded);
+});
 const rsRadio = (name) => document.querySelector('input[name="' + name + '"]:checked').value;
 const rsTown = (a) => String(a || "").split(",")[0].trim();
 
