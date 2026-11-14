@@ -9,6 +9,7 @@ Open it: **https://freshpancakes-web.github.io/litras/**
 - Your current location as the starting point (the browser asks first), with a "Use my location" button
 - From and To with address suggestions, up to 8 stops, the route on a map, and a cost for each leg
 - Station prices by network and municipality (average or cheapest), starting with the municipality you are in, the 8 cheapest stations, and a 5-day, 30-day and 1-year chart of the national average
+- After a route is calculated, the stations along it as price pins and a list, with a recommended stop you can add to the route
 - Trips per week and saved trips, with a weekly and monthly cost
 - Measuring consumption from a fill-up
 - Light and dark mode
