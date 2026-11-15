@@ -134,6 +134,7 @@ button.quiet:disabled { cursor: not-allowed; text-decoration: none; }
 /* Segmented controls (radio groups "cycle" and "basis") */
 .seg { display: grid; grid-template-columns: repeat(3, 1fr); padding: 3px; gap: 3px; border: 1px solid var(--line-strong); border-radius: 10px; }
 .seg2 { grid-template-columns: repeat(2, 1fr); }
+.seg4 { grid-template-columns: repeat(4, 1fr); }
 .seg label { display: block; color: var(--ink); font-size: 14px; position: relative; }
 .seg input { position: absolute; opacity: 0; pointer-events: none; }
 .seg span { display: block; text-align: center; padding: 8px 4px; border-radius: 7px; cursor: pointer; color: var(--muted); }
@@ -161,6 +162,10 @@ details summary::before { content: ""; width: 6px; height: 6px; border-right: 1.
 details[open] summary::before { transform: rotate(45deg) translate(-1px, -1px); }
 details[open] summary { margin-bottom: 14px; }
 .stack { display: flex; flex-direction: column; gap: 12px; }
+.carform { border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+.carform[hidden] { display: none; }
+.carform h3 { font-size: 15px; font-weight: 600; margin: 0; }
+.carform .danger { margin-left: auto; }
 
 /* Trip: stops and legs */
 .route { display: flex; flex-direction: column; gap: 12px; }
@@ -385,11 +390,13 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
       <div class="hint" id="distHint">Example distance. Calculate a route to fill this in, or type your own.</div>
       <ol class="legs" id="legs" aria-label="Route legs" hidden></ol>
       <div class="field-label" id="cycleLabel">Driving type</div>
-      <div class="seg" role="radiogroup" aria-labelledby="cycleLabel">
+      <div class="seg seg4" role="radiogroup" aria-labelledby="cycleLabel">
+        <label><input type="radio" name="cycle" value="auto" checked><span>Auto</span></label>
         <label><input type="radio" name="cycle" value="city"><span>City</span></label>
-        <label><input type="radio" name="cycle" value="mixed" checked><span>Mixed</span></label>
+        <label><input type="radio" name="cycle" value="mixed"><span>Mixed</span></label>
         <label><input type="radio" name="cycle" value="highway"><span>Highway</span></label>
       </div>
+      <div class="hint" id="cycleNote" role="status"></div>
       <div class="tripopts">
         <label class="check" for="roundTrip"><input id="roundTrip" type="checkbox"> Round trip</label>
         <label class="perweek" for="perWeek">Trips per week <input id="perWeek" type="number" step="1" min="0" max="50" placeholder="e.g. 5"></label>
@@ -462,31 +469,33 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
       <label for="carSelect">Vehicle
         <select id="carSelect"></select>
       </label>
-      <div class="hint" id="carSpec"></div>
-      <div class="row">
-        <label for="consCity">City, l/100 km <input id="consCity" type="number" step="0.1" min="1" max="40"></label>
-        <label for="consMixed">Mixed, l/100 km <input id="consMixed" type="number" step="0.1" min="1" max="40"></label>
-        <label for="consHwy">Highway, l/100 km <input id="consHwy" type="number" step="0.1" min="1" max="40"></label>
+      <div class="hint" id="carSummary"></div>
+      <div class="actions">
+        <button id="editCar" class="quiet" type="button" aria-controls="carForm" aria-expanded="false">Edit car</button>
+        <button id="newCar" class="quiet" type="button" aria-controls="carForm" aria-expanded="false">+ Add a car</button>
       </div>
-      <div class="hint">Starting values are estimates. Replace them with your own measured numbers (see "Measure consumption" below).</div>
-      <details>
-        <summary>Add another car</summary>
-        <form id="addCar" class="stack">
-          <label for="newName">Name <input id="newName" type="text" placeholder="e.g. Skoda Octavia 2.0 TDI 110 kW" required></label>
-          <div class="row2">
-            <label for="newFuel">Fuel
-              <select id="newFuel"><option value="petrol95">Petrol 95</option><option value="diesel">Diesel</option><option value="lpg">LPG</option></select>
-            </label>
-            <label for="newTank">Tank (l) <input id="newTank" type="number" value="50" min="10" max="150" required></label>
-          </div>
-          <div class="row">
-            <label for="newCity">City <input id="newCity" type="number" step="0.1" value="9" min="1" required></label>
-            <label for="newMixed">Mixed <input id="newMixed" type="number" step="0.1" value="7" min="1" required></label>
-            <label for="newHwy">Highway <input id="newHwy" type="number" step="0.1" value="6" min="1" required></label>
-          </div>
-          <div><button type="submit">Add car</button></div>
-        </form>
-      </details>
+      <form id="carForm" class="stack carform" hidden aria-labelledby="cfTitle">
+        <h3 id="cfTitle">Edit car</h3>
+        <label for="cfName">Name <input id="cfName" type="text" maxlength="60" placeholder="e.g. Skoda Octavia 2.0 TDI 110 kW" required></label>
+        <div class="row">
+          <label for="cfFuel">Fuel
+            <select id="cfFuel"><option value="petrol95">Petrol 95</option><option value="diesel">Diesel</option><option value="lpg">LPG</option></select>
+          </label>
+          <label for="cfTank">Tank (l) <input id="cfTank" type="number" min="10" max="150" step="1" required></label>
+          <label for="cfYear">Year <input id="cfYear" type="number" min="1950" max="2100" step="1" placeholder="optional"></label>
+        </div>
+        <div class="row">
+          <label for="cfCity">City, l/100 km <input id="cfCity" type="number" step="0.1" min="1" max="40" required></label>
+          <label for="cfMixed">Mixed, l/100 km <input id="cfMixed" type="number" step="0.1" min="1" max="40" required></label>
+          <label for="cfHwy">Highway, l/100 km <input id="cfHwy" type="number" step="0.1" min="1" max="40" required></label>
+        </div>
+        <div class="hint">Starting values are estimates. Replace them with your own measured numbers (see "Measure consumption" below).</div>
+        <div class="actions">
+          <button id="cfSave" class="primary" type="submit">Save</button>
+          <button id="cfCancel" type="button">Cancel</button>
+          <button id="cfDelete" class="quiet danger" type="button">Delete car</button>
+        </div>
+      </form>
     </section>
 
     <section class="sec" aria-labelledby="h-price">
@@ -556,6 +565,7 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
 <script src="config.js"></script>   <!-- optional, local only: window.FC_CONFIG = { cartoKey } -->
 <script src="prices.js"></script>
 <script src="route-stations.js"></script>
+<script src="drive-split.js"></script>
 <script>
 /* ---------- Configuration ---------- */
 
@@ -612,34 +622,72 @@ let lastMeasured = null;
 const car = () => cars.find((c) => c.id === carId) || cars[0];
 const cycle = () => document.querySelector('input[name="cycle"]:checked').value;
 
+// Auto: the route's own city / mixed / highway split (from road speeds); Mixed when there is no route.
+function routeSplit(route) {
+  if (!route || !Array.isArray(route.legs) || !route.legs.length || !route.legs.every((l) => l.split)) return null;
+  return route.legs.reduce((a, l) => DriveSplit.add(a, l.split), DriveSplit.empty());
+}
+function consFor(c, type, route) {
+  if (type === "auto") { const sp = routeSplit(route); return sp ? DriveSplit.consumption(sp, c.cons) : c.cons.mixed; }
+  return c.cons[type] || c.cons.mixed;
+}
+const consNow = () => consFor(car(), cycle(), lastRoute);
+
+function syncCycleNote() {
+  const note = $("cycleNote");
+  note.hidden = cycle() !== "auto";
+  const sp = routeSplit(lastRoute);
+  if (!sp) { note.textContent = "Auto: no route yet, using Mixed"; return; }
+  const parts = [["highway", sp.highway], ["mixed", sp.mixed], ["city", sp.city]]
+    .map(([name, m]) => [name, Math.round(m / 1000)]).filter(([, km]) => km > 0);
+  note.textContent = "Auto: " + parts.map(([name, km]) => km + " km " + name).join(", ");
+}
+
 /* ---------- Car UI ---------- */
 
-function renderCars() {
+function renderCars(keepPrice) {
   const sel = $("carSelect");
   sel.innerHTML = "";
   cars.forEach((c) => sel.appendChild(new Option((c.year ? c.year + " " : "") + c.name, c.id, false, c.id === carId)));
-  syncCarFields();
+  syncCarFields(keepPrice);
 }
 
-function syncCarFields() {
+// keepPrice: leave a price the person typed or picked (same fuel); otherwise take the network price for the car's fuel.
+function syncCarFields(keepPrice) {
   const c = car();
-  $("consCity").value = c.cons.city;
-  $("consMixed").value = c.cons.mixed;
-  $("consHwy").value = c.cons.highway;
-  $("carSpec").textContent = FUELS[c.fuel] + " · " + c.tank + " l tank";
+  $("carSummary").textContent = FUELS[c.fuel] + " · " + c.tank + " l tank · " +
+    [c.cons.city, c.cons.mixed, c.cons.highway].map((v) => fmt(v, 1)).join(" / ") + " l/100 km (city / mixed / highway)";
   $("priceLabel").textContent = FUELS[c.fuel] + " (EUR/l)";
+  if (keepPrice && priceDirty) { calc(); return; }
   priceDirty = false;
   applyPriceToInput();
   calc();
 }
 
-function readConsFields() {
-  const c = car();
-  c.cons.city = parseFloat($("consCity").value) || c.cons.city;
-  c.cons.mixed = parseFloat($("consMixed").value) || c.cons.mixed;
-  c.cons.highway = parseFloat($("consHwy").value) || c.cons.highway;
-  store.set("fc.cars", cars);
-  calc();
+// One form edits the selected car or adds a new one.
+let carFormMode = null;   // "edit" | "new" while the form is open
+function openCarForm(mode) {
+  carFormMode = mode;
+  const c = mode === "edit" ? car() : { name: "", year: null, fuel: "petrol95", tank: 50, cons: { city: 9, mixed: 7, highway: 6 } };
+  $("cfTitle").textContent = mode === "edit" ? "Edit car" : "Add a car";
+  $("cfName").value = c.name; $("cfYear").value = c.year || "";
+  $("cfFuel").value = c.fuel; $("cfTank").value = c.tank;
+  $("cfCity").value = c.cons.city; $("cfMixed").value = c.cons.mixed; $("cfHwy").value = c.cons.highway;
+  $("cfDelete").hidden = mode !== "edit" || cars.length < 2;
+  $("carForm").hidden = false;
+  $("editCar").setAttribute("aria-expanded", String(mode === "edit"));
+  $("newCar").setAttribute("aria-expanded", String(mode === "new"));
+  $("cfName").focus();
+}
+function closeCarForm() {
+  carFormMode = null;
+  $("carForm").hidden = true;
+  $("editCar").setAttribute("aria-expanded", "false");
+  $("newCar").setAttribute("aria-expanded", "false");
+}
+function carsChanged(keepPrice) {
+  store.set("fc.cars", cars); store.set("fc.carId", carId);
+  renderCars(keepPrice);
   renderRouteStations();
 }
 
@@ -647,8 +695,8 @@ function readConsFields() {
 
 function calc() {
   const c = car();
-  const key = cycle() === "highway" ? "highway" : cycle();
-  const cons = c.cons[key];
+  const cons = consNow();
+  syncCycleNote();
   const oneWay = Math.max(0, parseFloat($("distance").value) || 0);
   const km = oneWay * ($("roundTrip").checked ? 2 : 1);
   const price = parseFloat($("price").value) || 0;
@@ -1061,7 +1109,7 @@ let stopSeq = 0;
 let routeCoords = null;      // the calculated route as [lat, lng] points, or null when there is no route to measure against
 let routeItems = [];         // stations along the route in the chosen order (RouteStations.corridor items)
 let routeRecommendation = null;   // RouteStations.recommend result for routeItems
-let lastRoute = null;        // { legs: [{ meters, seconds }], names: [...] } from the last calculated route
+let lastRoute = null;        // { legs: [{ meters, seconds, split }], names: [...] } from the last calculated route
 
 const pinLetter = (i) => String.fromCharCode(65 + i);
 const shortName = (label) => (label || "").split(",")[0].trim() || "?";
@@ -1288,11 +1336,14 @@ async function fetchRoute(points) {
     if (!f) throw new Error("No driving route found.");
     return {
       meters: f.properties.summary.distance, seconds: f.properties.summary.duration, coords: f.geometry.coordinates,
-      legs: (f.properties.segments || []).map((s) => ({ meters: s.distance, seconds: s.duration }))
+      legs: (f.properties.segments || []).map((s) => ({ meters: s.distance, seconds: s.duration,
+        split: DriveSplit.classify(s.steps && s.steps.length
+          ? s.steps.map((st) => ({ meters: st.distance, seconds: st.duration }))
+          : [{ meters: s.distance, seconds: s.duration }]) }))
     };
   }
   const url = "https://router.project-osrm.org/route/v1/driving/" + points.map((p) => p.lng + "," + p.lat).join(";") +
-    "?overview=full&geometries=geojson";
+    "?overview=full&geometries=geojson&annotations=distance,duration";
   const res = await fetch(url);
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data.code !== "Ok" || !data.routes || !data.routes.length) {
@@ -1301,7 +1352,13 @@ async function fetchRoute(points) {
   const r = data.routes[0];
   return {
     meters: r.distance, seconds: r.duration, coords: r.geometry.coordinates,
-    legs: (r.legs || []).map((l) => ({ meters: l.distance, seconds: l.duration }))
+    legs: (r.legs || []).map((l) => {
+      const a = l.annotation;
+      const pieces = a && Array.isArray(a.distance) && Array.isArray(a.duration) && a.distance.length
+        ? a.distance.map((m, i) => ({ meters: m, seconds: a.duration[i] }))
+        : [{ meters: l.distance, seconds: l.duration }];   // no speed details: the leg's own average
+      return { meters: l.distance, seconds: l.duration, split: DriveSplit.classify(pieces) };
+    })
   };
 }
 
@@ -1309,9 +1366,9 @@ function renderLegs() {
   const ol = $("legs");
   ol.innerHTML = "";
   if (!lastRoute || lastRoute.legs.length < 2) { ol.hidden = true; return; }
-  const cons = car().cons[cycle()];
   const price = parseFloat($("price").value) || 0;
   lastRoute.legs.forEach((leg, i) => {
+    const cons = consFor(car(), cycle(), { legs: [leg] });
     const km = leg.meters / 1000, litres = km * cons / 100;
     const li = document.createElement("li");
     const nm = document.createElement("span"); nm.className = "nm";
@@ -1571,10 +1628,37 @@ function measure() {
 
 /* ---------- Events ---------- */
 
-$("carSelect").addEventListener("change", (e) => { carId = e.target.value; store.set("fc.carId", carId); syncCarFields(); });
-["consCity", "consMixed", "consHwy"].forEach((id) => $(id).addEventListener("change", readConsFields));
+$("carSelect").addEventListener("change", (e) => { carId = e.target.value; store.set("fc.carId", carId); closeCarForm(); syncCarFields(); });
+$("editCar").addEventListener("click", () => openCarForm("edit"));
+$("newCar").addEventListener("click", () => openCarForm("new"));
+$("cfCancel").addEventListener("click", () => { const back = carFormMode === "new" ? $("newCar") : $("editCar"); closeCarForm(); back.focus(); });
+$("carForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const num = (id, fallback) => { const v = parseFloat($(id).value); return v > 0 ? v : fallback; };
+  const year = parseInt($("cfYear").value, 10);
+  const fields = {
+    name: $("cfName").value.trim(), year: year > 0 ? year : null, fuel: $("cfFuel").value, tank: num("cfTank", 50),
+    cons: { city: num("cfCity", 9), mixed: num("cfMixed", 7), highway: num("cfHwy", 6) }
+  };
+  if (!fields.name) return;
+  const sameFuel = carFormMode === "edit" && car().fuel === fields.fuel;
+  if (carFormMode === "edit") Object.assign(car(), fields);
+  else { const c = Object.assign({ id: "car-" + Date.now() }, fields); cars.push(c); carId = c.id; }
+  closeCarForm();
+  carsChanged(sameFuel);
+  $("editCar").focus();
+});
+$("cfDelete").addEventListener("click", () => {
+  const c = car();
+  if (cars.length < 2 || !confirm("Delete " + c.name + "? This can't be undone.")) return;
+  cars = cars.filter((x) => x !== c);
+  carId = cars[0].id;
+  closeCarForm();
+  carsChanged();
+  $("editCar").focus();
+});
 ["distance", "price"].forEach((id) => $(id).addEventListener("input", () => { if (id === "price") priceDirty = true; calc(); }));
-$("distance").addEventListener("input", () => { $("distHint").textContent = "Manual distance."; lastRoute = null; renderLegs(); clearRouteStations(); });
+$("distance").addEventListener("input", () => { $("distHint").textContent = "Manual distance."; lastRoute = null; calc(); clearRouteStations(); });
 $("addStop").addEventListener("click", addStop);
 $("roundTrip").addEventListener("change", calc);
 document.querySelectorAll('input[name="cycle"]').forEach((r) => r.addEventListener("change", calc));
@@ -1601,25 +1685,12 @@ $("mUse").addEventListener("click", () => {
   if (lastMeasured == null) return;
   car().cons.mixed = Math.round(lastMeasured * 10) / 10;
   store.set("fc.cars", cars);
-  $("consMixed").value = car().cons.mixed;
-  calc();
+  if (carFormMode === "edit") $("cfMixed").value = car().cons.mixed;   // so Save doesn't write the old value back
+  syncCarFields(true);
+  renderRouteStations();
   $("mOut").textContent += " · saved as mixed value";
 });
 
-$("addCar").addEventListener("submit", (e) => {
-  e.preventDefault();
-  const name = $("newName").value.trim();
-  if (!name) return;
-  const c = {
-    id: "car-" + Date.now(), name, year: null, fuel: $("newFuel").value,
-    tank: parseFloat($("newTank").value) || 50,
-    cons: { city: parseFloat($("newCity").value), mixed: parseFloat($("newMixed").value), highway: parseFloat($("newHwy").value) }
-  };
-  cars.push(c); carId = c.id;
-  store.set("fc.cars", cars); store.set("fc.carId", carId);
-  e.target.reset(); e.target.closest("details").open = false;
-  renderCars();
-});
 
 /* ---------- Saved trips (commute) ---------- */
 
@@ -1632,7 +1703,7 @@ const typedPlace = (holder, prop, input) => holder[prop] || (input.value.trim() 
 const hasCoords = (p) => p && Number.isFinite(p.lat) && Number.isFinite(p.lng);
 
 function tripCost(t) {
-  const cons = car().cons[t.cycle] || car().cons.mixed;
+  const cons = consFor(car(), t.cycle, t.legs);
   const price = parseFloat($("price").value) || 0;
   const trip = t.km * (t.round ? 2 : 1) * cons / 100 * price;
   return { trip, week: trip * t.perWeek, month: trip * t.perWeek * 52 / 12 };

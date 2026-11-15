@@ -298,7 +298,7 @@ class OfflineTest(unittest.TestCase):
             p.wait_for_timeout(100)
         keys = p.evaluate("caches.keys()")
         self.assertIn("other-project", keys)
-        self.assertIn("fc-v3", keys)
+        self.assertIn("fc-v4", keys)
         self.assertNotIn("fc-old", keys)
 
     def test_route_stations_js_cached(self):
@@ -313,6 +313,8 @@ class OfflineTest(unittest.TestCase):
         }""")
         self.assertTrue([u for u in cached if u.endswith("/route-stations.js")],
                         "route-stations.js is not in the offline cache: %s" % cached)
+        self.assertTrue([u for u in cached if u.endswith("/drive-split.js")],
+                        "drive-split.js is not in the offline cache: %s" % cached)
 
     def test_server_error_keeps_cached_prices(self):
         old = datetime.date.today() - datetime.timedelta(days=2)
