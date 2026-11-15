@@ -1449,6 +1449,63 @@ class AppTest(unittest.TestCase):
         page.wait_for_selector("#routeMsg.ok")
         self.assertEqual(page.evaluate("lastRoute.legs[0].split"), {"city": 0, "mixed": 0, "highway": 100000})
 
+    def pick_cycle(self, page, value):
+        page.locator('label:has(input[name="cycle"][value="%s"])' % value).click()
+
+    def test_auto_is_the_default_and_shows_the_split(self):
+        page = self.route_speeds()
+        self.assertTrue(page.is_checked('input[name="cycle"][value="auto"]'))
+        self.assertEqual(self.text("cycleNote"), "Auto: 80 km highway, 20 km city")
+        self.assertEqual(self.text("rCons"), "6.6 l/100")   # (20 x 9.2 + 80 x 6.0) / 100
+
+    def test_auto_cost_uses_each_part(self):
+        page = self.route_speeds()
+        self.assertEqual(self.text("rLitres"), "6.6")
+        price = float(self.value("price"))
+        self.assertEqual(self.text("rCost"), "%.2f" % (6.64 * price))
+
+    def test_auto_without_route_uses_mixed(self):
+        page = self.open()
+        self.assertEqual(self.text("cycleNote"), "Auto: no route yet, using Mixed")
+        self.assertEqual(self.text("rCons"), "7.0 l/100")
+
+    def test_typed_distance_drops_the_split(self):
+        page = self.route_speeds()
+        page.fill("#distance", "50")
+        self.assertEqual(self.text("cycleNote"), "Auto: no route yet, using Mixed")
+
+    def test_manual_type_still_works(self):
+        page = self.route_speeds()
+        self.pick_cycle(page, "city")
+        self.assertEqual(self.text("rCons"), "9.2 l/100")
+        self.assertTrue(page.locator("#cycleNote").is_hidden())
+
+    def test_round_trip_auto_doubles(self):
+        page = self.route_speeds()
+        page.check("#roundTrip")
+        self.assertEqual(self.text("rLitres"), "13.3")
+
+    def test_saved_auto_trip_prices_with_its_split(self):
+        page = self.route_speeds()
+        page.click("#saveTripBtn")
+        page.fill("#tripName", "Commute")
+        page.click("#saveTrip button[type=submit]")
+        self.pick_cycle(page, "highway")
+        got = page.evaluate("tripCost(trips[0]).trip")
+        price = float(self.value("price"))
+        self.assertAlmostEqual(got, 6.64 * price, places=6)
+        self.assertEqual(page.evaluate("trips[0].cycle"), "auto")
+
+    def test_old_saved_trip_keeps_its_type(self):
+        page = self.open()
+        page.evaluate("""localStorage.setItem('fc.trips', JSON.stringify([{id: 't1', name: 'Old', origin: null, dest: null,
+            stops: [], km: 100, duration: '', legs: {legs: [{meters: 100000, seconds: 4000}], names: ['A', 'B']},
+            round: false, cycle: 'city', perWeek: 0}]))""")
+        page.reload()
+        page.wait_for_selector(".leaflet-container")
+        price = float(self.value("price"))
+        self.assertAlmostEqual(page.evaluate("tripCost(trips[0]).trip"), 9.2 * price, places=6)
+
     def test_no_secret_tracked(self):
         out = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, check=True, capture_output=True).stdout
         files = [f for f in out.decode("utf-8").split("\0") if f]

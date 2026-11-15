@@ -134,6 +134,7 @@ button.quiet:disabled { cursor: not-allowed; text-decoration: none; }
 /* Segmented controls (radio groups "cycle" and "basis") */
 .seg { display: grid; grid-template-columns: repeat(3, 1fr); padding: 3px; gap: 3px; border: 1px solid var(--line-strong); border-radius: 10px; }
 .seg2 { grid-template-columns: repeat(2, 1fr); }
+.seg4 { grid-template-columns: repeat(4, 1fr); }
 .seg label { display: block; color: var(--ink); font-size: 14px; position: relative; }
 .seg input { position: absolute; opacity: 0; pointer-events: none; }
 .seg span { display: block; text-align: center; padding: 8px 4px; border-radius: 7px; cursor: pointer; color: var(--muted); }
@@ -385,11 +386,13 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
       <div class="hint" id="distHint">Example distance. Calculate a route to fill this in, or type your own.</div>
       <ol class="legs" id="legs" aria-label="Route legs" hidden></ol>
       <div class="field-label" id="cycleLabel">Driving type</div>
-      <div class="seg" role="radiogroup" aria-labelledby="cycleLabel">
+      <div class="seg seg4" role="radiogroup" aria-labelledby="cycleLabel">
+        <label><input type="radio" name="cycle" value="auto" checked><span>Auto</span></label>
         <label><input type="radio" name="cycle" value="city"><span>City</span></label>
-        <label><input type="radio" name="cycle" value="mixed" checked><span>Mixed</span></label>
+        <label><input type="radio" name="cycle" value="mixed"><span>Mixed</span></label>
         <label><input type="radio" name="cycle" value="highway"><span>Highway</span></label>
       </div>
+      <div class="hint" id="cycleNote" role="status"></div>
       <div class="tripopts">
         <label class="check" for="roundTrip"><input id="roundTrip" type="checkbox"> Round trip</label>
         <label class="perweek" for="perWeek">Trips per week <input id="perWeek" type="number" step="1" min="0" max="50" placeholder="e.g. 5"></label>
@@ -613,6 +616,27 @@ let lastMeasured = null;
 const car = () => cars.find((c) => c.id === carId) || cars[0];
 const cycle = () => document.querySelector('input[name="cycle"]:checked').value;
 
+// Auto: the route's own city / mixed / highway split (from road speeds); Mixed when there is no route.
+function routeSplit(route) {
+  if (!route || !Array.isArray(route.legs) || !route.legs.length || !route.legs.every((l) => l.split)) return null;
+  return route.legs.reduce((a, l) => DriveSplit.add(a, l.split), DriveSplit.empty());
+}
+function consFor(c, type, route) {
+  if (type === "auto") { const sp = routeSplit(route); return sp ? DriveSplit.consumption(sp, c.cons) : c.cons.mixed; }
+  return c.cons[type] || c.cons.mixed;
+}
+const consNow = () => consFor(car(), cycle(), lastRoute);
+
+function syncCycleNote() {
+  const note = $("cycleNote");
+  note.hidden = cycle() !== "auto";
+  const sp = routeSplit(lastRoute);
+  if (!sp) { note.textContent = "Auto: no route yet, using Mixed"; return; }
+  const parts = [["highway", sp.highway], ["mixed", sp.mixed], ["city", sp.city]]
+    .map(([name, m]) => [name, Math.round(m / 1000)]).filter(([, km]) => km > 0);
+  note.textContent = "Auto: " + parts.map(([name, km]) => km + " km " + name).join(", ");
+}
+
 /* ---------- Car UI ---------- */
 
 function renderCars() {
@@ -648,8 +672,8 @@ function readConsFields() {
 
 function calc() {
   const c = car();
-  const key = cycle() === "highway" ? "highway" : cycle();
-  const cons = c.cons[key];
+  const cons = consNow();
+  syncCycleNote();
   const oneWay = Math.max(0, parseFloat($("distance").value) || 0);
   const km = oneWay * ($("roundTrip").checked ? 2 : 1);
   const price = parseFloat($("price").value) || 0;
@@ -1319,9 +1343,9 @@ function renderLegs() {
   const ol = $("legs");
   ol.innerHTML = "";
   if (!lastRoute || lastRoute.legs.length < 2) { ol.hidden = true; return; }
-  const cons = car().cons[cycle()];
   const price = parseFloat($("price").value) || 0;
   lastRoute.legs.forEach((leg, i) => {
+    const cons = consFor(car(), cycle(), { legs: [leg] });
     const km = leg.meters / 1000, litres = km * cons / 100;
     const li = document.createElement("li");
     const nm = document.createElement("span"); nm.className = "nm";
@@ -1584,7 +1608,7 @@ function measure() {
 $("carSelect").addEventListener("change", (e) => { carId = e.target.value; store.set("fc.carId", carId); syncCarFields(); });
 ["consCity", "consMixed", "consHwy"].forEach((id) => $(id).addEventListener("change", readConsFields));
 ["distance", "price"].forEach((id) => $(id).addEventListener("input", () => { if (id === "price") priceDirty = true; calc(); }));
-$("distance").addEventListener("input", () => { $("distHint").textContent = "Manual distance."; lastRoute = null; renderLegs(); clearRouteStations(); });
+$("distance").addEventListener("input", () => { $("distHint").textContent = "Manual distance."; lastRoute = null; calc(); clearRouteStations(); });
 $("addStop").addEventListener("click", addStop);
 $("roundTrip").addEventListener("change", calc);
 document.querySelectorAll('input[name="cycle"]').forEach((r) => r.addEventListener("change", calc));
@@ -1642,7 +1666,7 @@ const typedPlace = (holder, prop, input) => holder[prop] || (input.value.trim() 
 const hasCoords = (p) => p && Number.isFinite(p.lat) && Number.isFinite(p.lng);
 
 function tripCost(t) {
-  const cons = car().cons[t.cycle] || car().cons.mixed;
+  const cons = consFor(car(), t.cycle, t.legs);
   const price = parseFloat($("price").value) || 0;
   const trip = t.km * (t.round ? 2 : 1) * cons / 100 * price;
   return { trip, week: trip * t.perWeek, month: trip * t.perWeek * 52 / 12 };
