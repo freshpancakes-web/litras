@@ -76,17 +76,6 @@ header {
 h1 { font-size: 20px; font-weight: 600; letter-spacing: -.01em; line-height: 1.2; margin: 0; }
 .sub { display: block; color: var(--muted); font-size: 14px; margin-top: 2px; }
 
-.views { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 3px; gap: 3px; border: 1px solid var(--line-strong); border-radius: 10px; margin-left: auto; }
-.views a { display: block; text-align: center; padding: 7px 14px; border-radius: 7px; color: var(--muted); font-size: 14px; font-weight: 500; text-decoration: none; white-space: nowrap; }
-.views a:hover { color: var(--ink); }
-.views a[aria-current="page"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
-.views a:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
-@media (max-width: 640px) {
-  header { flex-wrap: wrap; row-gap: 14px; }
-  header .brand { flex: 1 1 0; }
-  .views { order: 3; flex: 1 0 100%; margin-left: 0; }
-}
-:root:not([data-view="plan"]) .plan-only, :root[data-view="plan"] .cost-only { display: none !important; }
 
 .theme {
   display: inline-flex; align-items: center; gap: 8px; flex: none;
@@ -242,15 +231,12 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
 /* Stations on your route */
 .rs[hidden], .rs-rec[hidden], .rs-empty[hidden], #rsShowAll[hidden], #rsNote[hidden] { display: none; }
 .rs { gap: 16px; }
-.rs-net { grid-column: 1 / -1; }
 .rs-toggle { display: inline-flex; align-items: center; gap: 6px; height: auto; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; text-align: left; }
 .rs-toggle svg { width: 18px; height: 18px; flex: none; color: var(--muted); transition: transform .15s; }
 .rs-toggle[aria-expanded="false"] svg { transform: rotate(-90deg); }
 .rs-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
-.rs.collapsed .rs-body:not(#rsSummary), .rs.collapsed #rsPrompt { display: none !important; }
+.rs.collapsed .rs-body:not(#rsSummary) { display: none !important; }
 .rs.collapsed { gap: 4px; }
-.rs.no-route .rs-body, .rs:not(.no-route) #rsPrompt { display: none !important; }
-.rs-opts { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 12px 16px; }
 .rs-rec { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 14px 16px; border: 1px solid var(--accent); border-radius: 10px; background: var(--accent-soft); }
 .rs-rec p { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
 #rsMsg:empty { display: none; }
@@ -263,7 +249,6 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
 .rs-row .p { font-size: 15px; font-weight: 600; color: var(--accent); }
 .rs-row small { display: block; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
 .rs-row span { min-width: 0; overflow-wrap: anywhere; }
-@media (max-width: 480px) { .rs-opts { grid-template-columns: minmax(0, 1fr); } }
 
 /* Station list */
 .stlist { list-style: none; margin: 0; padding: 0; }
@@ -355,10 +340,6 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
         <span class="sub">What will this drive cost you?</span>
       </div>
     </div>
-    <nav class="views" aria-label="View">
-      <a id="viewCost" href="#">Trip cost</a>
-      <a id="viewPlan" href="#plan">Plan ride</a>
-    </nav>
     <button class="theme" id="themeBtn" type="button" role="switch" aria-checked="false" aria-label="Dark mode">
       <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
       <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
@@ -392,29 +373,29 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
         <button id="routeBtn" class="primary" type="button">Calculate route</button>
         <span class="msg" id="routeMsg" role="status"></span>
       </div>
-      <div class="row2 cost-only">
+      <div class="row2">
         <label for="distance">Distance (km) <input id="distance" type="number" step="0.1" min="0" value="100"></label>
         <label for="duration">Drive time <input id="duration" type="text" value="" placeholder="From route" readonly></label>
       </div>
-      <div class="hint cost-only" id="distHint">Example distance. Calculate a route to fill this in, or type your own.</div>
-      <ol class="legs cost-only" id="legs" aria-label="Route legs" hidden></ol>
-      <div class="field-label cost-only" id="cycleLabel">Driving type</div>
-      <div class="seg cost-only" role="radiogroup" aria-labelledby="cycleLabel">
+      <div class="hint" id="distHint">Example distance. Calculate a route to fill this in, or type your own.</div>
+      <ol class="legs" id="legs" aria-label="Route legs" hidden></ol>
+      <div class="field-label" id="cycleLabel">Driving type</div>
+      <div class="seg" role="radiogroup" aria-labelledby="cycleLabel">
         <label><input type="radio" name="cycle" value="city"><span>City</span></label>
         <label><input type="radio" name="cycle" value="mixed" checked><span>Mixed</span></label>
         <label><input type="radio" name="cycle" value="highway"><span>Highway</span></label>
       </div>
-      <div class="tripopts cost-only">
+      <div class="tripopts">
         <label class="check" for="roundTrip"><input id="roundTrip" type="checkbox"> Round trip</label>
         <label class="perweek" for="perWeek">Trips per week <input id="perWeek" type="number" step="1" min="0" max="50" placeholder="e.g. 5"></label>
       </div>
-      <div class="actions cost-only"><button id="saveTripBtn" class="quiet" type="button" aria-expanded="false" aria-controls="saveTrip">Save this trip</button></div>
-      <form id="saveTrip" class="savebox cost-only" hidden>
+      <div class="actions"><button id="saveTripBtn" class="quiet" type="button" aria-expanded="false" aria-controls="saveTrip">Save this trip</button></div>
+      <form id="saveTrip" class="savebox" hidden>
         <label for="tripName">Name <input id="tripName" type="text" maxlength="60" required></label>
         <button class="primary" type="submit">Save</button>
         <button id="saveTripCancel" type="button">Cancel</button>
       </form>
-      <details class="cost-only">
+      <details>
         <summary>Routing options</summary>
         <div class="stack">
           <label for="orsKey">OpenRouteService key (optional)
@@ -426,7 +407,7 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
     </section>
 
     <aside class="side" aria-label="Results and map">
-      <section class="results cost-only" id="results" aria-labelledby="h-res">
+      <section class="results" id="results" aria-labelledby="h-res">
         <h2 id="h-res">This trip</h2>
         <div class="hero">
           <div class="cost"><div class="k">Cost</div><div class="v"><span id="rCost">0.00</span><span class="u">EUR</span></div></div>
@@ -447,14 +428,10 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
         </div>
       </section>
 
-      <section class="results rs plan-only" id="routeStations" aria-labelledby="h-rs" hidden>
+      <section class="results rs" id="routeStations" aria-labelledby="h-rs" hidden>
         <div>
           <h2 id="h-rs"><button id="rsToggle" class="rs-toggle" type="button" aria-expanded="true">Stations on your route<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button></h2>
           <div class="hint rs-body" id="rsSummary" role="status"></div>
-        </div>
-        <div class="hint" id="rsPrompt">Enter From and To and press Calculate route to see the stations on your way.</div>
-        <div class="rs-opts rs-body">
-          <label for="rsNetwork" class="rs-net">Station network <select id="rsNetwork"></select></label>
         </div>
         <div class="rs-rec rs-body" id="rsRecommend" hidden>
           <p id="rsRecText"></p>
@@ -507,7 +484,7 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
       </details>
     </section>
 
-    <section class="sec cost-only" aria-labelledby="h-price">
+    <section class="sec" aria-labelledby="h-price">
       <div class="sec-head">
         <h2 id="h-price">Fuel price</h2>
         <span class="pill" id="priceState">bundled</span>
@@ -544,7 +521,7 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
       </details>
     </section>
 
-    <section class="sec cost-only" aria-labelledby="h-meas">
+    <section class="sec" aria-labelledby="h-meas">
       <h2 id="h-meas">Measure consumption</h2>
       <div class="row">
         <label for="mKm">Km since last fill <input id="mKm" type="number" step="0.1" min="0" placeholder="620"></label>
@@ -565,7 +542,7 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
   <footer class="foot">Map data &copy; OpenStreetMap contributors, tiles &copy; CARTO. Fuel prices: Lithuanian Energy Agency (LEA) and the companies operating the stations. Address search by Photon, municipality lookup by Nominatim (OpenStreetMap), routes by OSRM or OpenRouteService. Station positions looked up from addresses with Photon and Nominatim.</footer>
 </div>
 
-<div class="minibar cost-only" id="minibar" aria-hidden="true">
+<div class="minibar" id="minibar" aria-hidden="true">
   <div><b id="miniCost">0.00 EUR</b><span id="miniLitres">0.0 L</span></div>
   <a href="#results" tabindex="-1">Results and map</a>
 </div>
@@ -726,10 +703,6 @@ function loadLea() {
     if (muni.selectedIndex < 0) muni.value = "";
   }
   net.disabled = muni.disabled = !lea;
-  const rsNet = $("rsNetwork");   // Plan ride's copy of the same setting
-  rsNet.innerHTML = net.innerHTML;
-  rsNet.value = net.value;
-  rsNet.disabled = !lea;
 }
 
 function renderStations(rows, field) {
@@ -1426,9 +1399,8 @@ function renderRouteStations() {
   const sec = $("routeStations");
   routeItems = []; routeRecommendation = null; rsShowAll = false;
   $("rsMsg").textContent = "";
-  sec.classList.toggle("no-route", !routeCoords);
   if (!routeCoords || !lea) {
-    sec.hidden = !lea;   // without a route Plan ride shows #rsPrompt instead of the list
+    sec.hidden = true;
     $("rsList").innerHTML = "";
     if (typeof drawStationPins === "function") drawStationPins(routeItems, routeRecommendation);
     return;
@@ -1556,22 +1528,6 @@ function drawStationPins(items, rec) {
   });
 }
 
-// Two views share one route and map: Trip cost (no hash) and Plan ride (#plan). Stations show only in Plan ride.
-const currentView = () => location.hash === "#plan" ? "plan" : "cost";
-function applyView() {
-  const v = currentView();
-  document.documentElement.dataset.view = v;
-  syncMinibar();   // the results card moves when the view changes
-  [["viewCost", "cost"], ["viewPlan", "plan"]].forEach(([id, name]) => {
-    if (name === v) $(id).setAttribute("aria-current", "page"); else $(id).removeAttribute("aria-current");
-  });
-  if (!map || !stationLayer) return;
-  if (v === "plan") { if (!map.hasLayer(stationLayer)) stationLayer.addTo(map); }
-  else { map.closePopup(); if (map.hasLayer(stationLayer)) map.removeLayer(stationLayer); }
-  map.invalidateSize();
-}
-addEventListener("hashchange", applyView);
-
 function focusStationPin(item) {
   const m = stationMarkers.get(item);
   if (!map || !m) return;
@@ -1627,14 +1583,9 @@ $("routeBtn").addEventListener("click", calculateRoute);
 ["origin", "dest"].forEach((id) => $(id).addEventListener("keydown", (e) => { if (e.key === "Enter" && !$(id).hasAttribute("aria-activedescendant")) calculateRoute(); }));
 ["priceNetwork", "priceMuni"].forEach((id) => $(id).addEventListener("change", (e) => {
   store.set(id === "priceNetwork" ? "fc.priceNet" : "fc.priceMuni", e.target.value);
-  if (id === "priceNetwork") $("rsNetwork").value = e.target.value;
   priceDirty = false; applyPriceToInput();
   if (id === "priceMuni" && e.target.value === MUNI_AUTO && myMuniState !== "found") useMyLocation(false, false);
 }));
-$("rsNetwork").addEventListener("change", (e) => {
-  $("priceNetwork").value = e.target.value;
-  $("priceNetwork").dispatchEvent(new Event("change"));
-});
 document.querySelectorAll('input[name="basis"]').forEach((r) => r.addEventListener("change", () => {
   store.set("fc.basis", r.value); priceDirty = false; applyPriceToInput();
 }));
@@ -1841,7 +1792,6 @@ if (savedBasis) { const r = document.querySelector('input[name="basis"][value="'
 loadLea();
 renderCars();
 initMap();
-applyView();
 syncOfflineNote();
 wireSuggest($("origin"), $("originList"), places, "origin", placesChanged);
 wireSuggest($("dest"), $("destList"), places, "dest", placesChanged);
