@@ -645,18 +645,20 @@ function syncCycleNote() {
 
 /* ---------- Car UI ---------- */
 
-function renderCars() {
+function renderCars(keepPrice) {
   const sel = $("carSelect");
   sel.innerHTML = "";
   cars.forEach((c) => sel.appendChild(new Option((c.year ? c.year + " " : "") + c.name, c.id, false, c.id === carId)));
-  syncCarFields();
+  syncCarFields(keepPrice);
 }
 
-function syncCarFields() {
+// keepPrice: leave a price the person typed or picked (same fuel); otherwise take the network price for the car's fuel.
+function syncCarFields(keepPrice) {
   const c = car();
   $("carSummary").textContent = FUELS[c.fuel] + " · " + c.tank + " l tank · " +
     [c.cons.city, c.cons.mixed, c.cons.highway].map((v) => fmt(v, 1)).join(" / ") + " l/100 km (city / mixed / highway)";
   $("priceLabel").textContent = FUELS[c.fuel] + " (EUR/l)";
+  if (keepPrice && priceDirty) { calc(); return; }
   priceDirty = false;
   applyPriceToInput();
   calc();
@@ -683,9 +685,9 @@ function closeCarForm() {
   $("editCar").setAttribute("aria-expanded", "false");
   $("newCar").setAttribute("aria-expanded", "false");
 }
-function carsChanged() {
+function carsChanged(keepPrice) {
   store.set("fc.cars", cars); store.set("fc.carId", carId);
-  renderCars();
+  renderCars(keepPrice);
   renderRouteStations();
 }
 
@@ -1639,10 +1641,11 @@ $("carForm").addEventListener("submit", (e) => {
     cons: { city: num("cfCity", 9), mixed: num("cfMixed", 7), highway: num("cfHwy", 6) }
   };
   if (!fields.name) return;
+  const sameFuel = carFormMode === "edit" && car().fuel === fields.fuel;
   if (carFormMode === "edit") Object.assign(car(), fields);
   else { const c = Object.assign({ id: "car-" + Date.now() }, fields); cars.push(c); carId = c.id; }
   closeCarForm();
-  carsChanged();
+  carsChanged(sameFuel);
   $("editCar").focus();
 });
 $("cfDelete").addEventListener("click", () => {
@@ -1682,7 +1685,8 @@ $("mUse").addEventListener("click", () => {
   if (lastMeasured == null) return;
   car().cons.mixed = Math.round(lastMeasured * 10) / 10;
   store.set("fc.cars", cars);
-  syncCarFields();
+  if (carFormMode === "edit") $("cfMixed").value = car().cons.mixed;   // so Save doesn't write the old value back
+  syncCarFields(true);
   renderRouteStations();
   $("mOut").textContent += " · saved as mixed value";
 });

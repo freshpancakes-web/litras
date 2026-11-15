@@ -1605,6 +1605,42 @@ class AppTest(unittest.TestCase):
         page.click("#mUse")
         self.assertIn("/ 6.0 / 6.0 l/100 km", self.text("carSummary"))   # mixed is now 6.0
 
+    def test_saving_a_car_keeps_a_typed_price(self):
+        page = self.open()
+        page.fill("#price", "1.555")
+        page.click("#editCar")
+        page.fill("#cfName", "My Leon")
+        page.click("#cfSave")
+        self.assertEqual(self.value("price"), "1.555")
+
+    def test_changing_fuel_takes_the_new_fuel_price(self):
+        page = self.open()
+        page.fill("#price", "1.555")
+        page.click("#editCar")
+        page.select_option("#cfFuel", "diesel")
+        page.click("#cfSave")
+        self.assertNotEqual(self.value("price"), "1.555")
+
+    def test_using_a_measured_value_keeps_a_typed_price(self):
+        page = self.open()
+        page.fill("#price", "1.555")
+        page.fill("#mKm", "500")
+        page.fill("#mL", "30")
+        page.click("#mBtn")
+        page.click("#mUse")
+        self.assertEqual(self.value("price"), "1.555")
+
+    def test_measured_value_reaches_an_open_car_form(self):
+        page = self.open()
+        page.click("#editCar")
+        page.fill("#mKm", "500")
+        page.fill("#mL", "30")
+        page.click("#mBtn")
+        page.click("#mUse")
+        self.assertEqual(self.value("cfMixed"), "6")
+        page.click("#cfSave")
+        self.assertEqual(page.evaluate("car().cons.mixed"), 6)
+
     def test_car_form_fits_a_phone(self):
         page = self.open(width=360)
         page.click("#editCar")
