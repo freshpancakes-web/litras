@@ -5,7 +5,8 @@ A single page that works out the fuel use and cost of a car trip in Lithuania. I
 Open it: **https://freshpancakes-web.github.io/litras/**
 
 ## What it does
-- A list of cars with City, Mixed and Highway consumption you can edit, plus your own cars
+- Your cars, each with City, Mixed and Highway consumption: add, edit or delete them from the car card
+- An Auto driving type that works out how much of the route is city, mixed and highway driving from the road speeds
 - Your current location as the starting point (the browser asks first), with a "Use my location" button
 - From and To with address suggestions, up to 8 stops, the route on a map, and a cost for each leg
 - Station prices by network and municipality (average or cheapest), starting with the municipality you are in, the 8 cheapest stations, and a 5-day, 30-day and 1-year chart of the national average
@@ -29,6 +30,7 @@ Once opened online, the page opens offline too. Offline, the calculator, your ca
 |---|---|
 | `fuel-calculator.html` | The whole app. It also works when opened straight from the file. |
 | `manifest.webmanifest`, `sw.js`, `icons/` | Make the page installable and let it open offline. `sw.js` never caches `config.js` (it passes it through with a time limit); change `CACHE_NAME` in it to replace the cached copy in a release. |
+| `route-stations.js`, `drive-split.js` | Route maths: stations along the route, and the city/mixed/highway split from road speeds (below 60 km/h city, above 85 km/h highway). |
 | `prices.js` | Station prices, written by `update_prices.py`. Don't edit it by hand. |
 | `station-coords.json` | Map positions looked up from station addresses (OpenStreetMap), written by `update_prices.py`. Don't edit it by hand. |
 | `update_prices.py` | Finds LEA's newest Excel file, downloads it and writes `prices.js`, keeping about a year of history across files. `--no-geocode` skips looking up positions. `--check-fresh` fails if the prices are more than 7 days old. Python 3 standard library only. |

@@ -635,10 +635,10 @@ class AppTest(unittest.TestCase):
     ]
 
     def add_car(self, page, name, fuel):
-        page.locator("summary", has_text="Add another car").click()
-        page.fill("#newName", name)
-        page.select_option("#newFuel", fuel)
-        page.click("#addCar button[type=submit]")
+        page.click("#newCar")
+        page.fill("#cfName", name)
+        page.select_option("#cfFuel", fuel)
+        page.click("#cfSave")
 
     @staticmethod
     def long_history(first, last, step=1):
@@ -1505,6 +1505,110 @@ class AppTest(unittest.TestCase):
         page.wait_for_selector(".leaflet-container")
         price = float(self.value("price"))
         self.assertAlmostEqual(page.evaluate("tripCost(trips[0]).trip"), 9.2 * price, places=6)
+
+    # ----- car card -----
+
+    SUMMARY = "Petrol 95 · 50 l tank · 9.2 / 7.0 / 6.0 l/100 km (city / mixed / highway)"
+
+    def cars_saved(self, page):
+        return page.evaluate("JSON.parse(localStorage.getItem('fc.cars'))")
+
+    def test_car_card_is_compact(self):
+        page = self.open()
+        self.assertEqual(self.text("carSummary"), self.SUMMARY)
+        self.assertTrue(page.locator("#carForm").is_hidden())
+        self.assertEqual(page.locator("#consCity, #consMixed, #consHwy, #addCar").count(), 0)
+        self.assertTrue(page.locator("#editCar").is_visible())
+        self.assertTrue(page.locator("#newCar").is_visible())
+
+    def test_edit_car_changes_name_fuel_and_consumption(self):
+        page = self.open()
+        old_id = page.evaluate("carId")
+        page.click("#editCar")
+        self.assertTrue(page.locator("#carForm").is_visible())
+        self.assertEqual(self.value("cfName"), "SEAT Leon 1.8 TSI 132 kW")
+        self.assertEqual(self.value("cfMixed"), "7")
+        page.fill("#cfName", "My Leon")
+        page.select_option("#cfFuel", "diesel")
+        page.fill("#cfMixed", "6.5")
+        page.click("#cfSave")
+        self.assertTrue(page.locator("#carForm").is_hidden())
+        self.assertEqual(page.locator("#carSelect option:checked").inner_text(), "2017 My Leon")
+        self.assertTrue(self.text("carSummary").startswith("Diesel · 50 l tank · 9.2 / 6.5 / 6.0"))
+        self.assertEqual(self.text("priceLabel"), "Diesel (EUR/l)")
+        saved = self.cars_saved(page)
+        self.assertEqual(len(saved), 1)
+        self.assertEqual(saved[0]["id"], old_id)
+        self.assertEqual(saved[0]["cons"]["mixed"], 6.5)
+        self.assertEqual(self.text("rCons"), "6.5 l/100")
+
+    def test_add_car_selects_it(self):
+        page = self.open()
+        page.click("#newCar")
+        self.assertEqual(self.value("cfName"), "")
+        self.assertTrue(page.locator("#cfDelete").is_hidden())
+        page.fill("#cfName", "Skoda Octavia")
+        page.fill("#cfYear", "2019")
+        page.select_option("#cfFuel", "diesel")
+        page.fill("#cfTank", "55")
+        page.fill("#cfCity", "6")
+        page.fill("#cfMixed", "5")
+        page.fill("#cfHwy", "4.5")
+        page.click("#cfSave")
+        self.assertEqual(page.locator("#carSelect option").count(), 2)
+        self.assertEqual(page.locator("#carSelect option:checked").inner_text(), "2019 Skoda Octavia")
+        self.assertEqual(self.text("carSummary"), "Diesel · 55 l tank · 6.0 / 5.0 / 4.5 l/100 km (city / mixed / highway)")
+
+    def test_cancel_leaves_car_unchanged(self):
+        page = self.open()
+        page.click("#editCar")
+        page.fill("#cfName", "Changed")
+        page.click("#cfCancel")
+        self.assertTrue(page.locator("#carForm").is_hidden())
+        self.assertEqual(self.cars_saved(page) and self.cars_saved(page)[0]["name"] or page.evaluate("car().name"),
+                         "SEAT Leon 1.8 TSI 132 kW")
+
+    def test_delete_car(self):
+        page = self.open()
+        self.add_car(page, "Spare", "diesel")
+        self.assertEqual(page.locator("#carSelect option").count(), 2)
+        page.click("#editCar")
+        self.assertTrue(page.locator("#cfDelete").is_visible())
+        seen = []
+        page.once("dialog", lambda d: (seen.append(d.message), d.accept()))
+        page.click("#cfDelete")
+        self.assertEqual(seen, ["Delete Spare? This can't be undone."])
+        self.assertEqual(page.locator("#carSelect option").count(), 1)
+        self.assertEqual(self.text("carSummary"), self.SUMMARY)
+        self.assertEqual(self.text("priceLabel"), "Petrol 95 (EUR/l)")
+        self.assertEqual(len(self.cars_saved(page)), 1)
+        self.assertTrue(page.locator("#carForm").is_hidden())
+
+    def test_delete_hidden_for_last_car(self):
+        page = self.open()
+        page.click("#editCar")
+        self.assertTrue(page.locator("#cfDelete").is_hidden())
+
+    def test_dismissed_delete_keeps_car(self):
+        page = self.open()
+        self.add_car(page, "Spare", "diesel")
+        page.click("#editCar")
+        page.once("dialog", lambda d: d.dismiss())
+        page.click("#cfDelete")
+        self.assertEqual(page.locator("#carSelect option").count(), 2)
+
+    def test_measured_value_updates_summary(self):
+        page = self.open()
+        page.fill("#mKm", "500")
+        page.fill("#mL", "30")
+        page.click("#mBtn")
+        page.click("#mUse")
+        self.assertIn("/ 6.0 / 6.0 l/100 km", self.text("carSummary"))   # mixed is now 6.0
+
+    def test_car_form_fits_a_phone(self):
+        page = self.open(width=360)
+        page.click("#editCar")
+        self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth"), 360)
 
     def test_no_secret_tracked(self):
         out = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, check=True, capture_output=True).stdout
