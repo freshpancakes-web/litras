@@ -243,6 +243,12 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
 .rs[hidden], .rs-rec[hidden], .rs-empty[hidden], #rsShowAll[hidden], #rsNote[hidden] { display: none; }
 .rs { gap: 16px; }
 .rs-net { grid-column: 1 / -1; }
+.rs-toggle { display: inline-flex; align-items: center; gap: 6px; height: auto; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; text-align: left; }
+.rs-toggle svg { width: 18px; height: 18px; flex: none; color: var(--muted); transition: transform .15s; }
+.rs-toggle[aria-expanded="false"] svg { transform: rotate(-90deg); }
+.rs-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+.rs.collapsed .rs-body:not(#rsSummary), .rs.collapsed #rsPrompt { display: none !important; }
+.rs.collapsed { gap: 4px; }
 .rs.no-route .rs-body, .rs:not(.no-route) #rsPrompt { display: none !important; }
 .rs-opts { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 12px 16px; }
 .rs-rec { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 14px 16px; border: 1px solid var(--accent); border-radius: 10px; background: var(--accent-soft); }
@@ -443,26 +449,11 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
 
       <section class="results rs plan-only" id="routeStations" aria-labelledby="h-rs" hidden>
         <div>
-          <h2 id="h-rs">Stations on your route</h2>
+          <h2 id="h-rs"><button id="rsToggle" class="rs-toggle" type="button" aria-expanded="true">Stations on your route<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button></h2>
           <div class="hint rs-body" id="rsSummary" role="status"></div>
         </div>
         <div class="hint" id="rsPrompt">Enter From and To and press Calculate route to see the stations on your way.</div>
         <div class="rs-opts rs-body">
-          <div>
-            <div class="field-label" id="rsDetourLabel">Off route</div>
-            <div class="seg" role="radiogroup" aria-labelledby="rsDetourLabel">
-              <label><input type="radio" name="detourKm" value="1"><span>1 km</span></label>
-              <label><input type="radio" name="detourKm" value="2" checked><span>2 km</span></label>
-              <label><input type="radio" name="detourKm" value="5"><span>5 km</span></label>
-            </div>
-          </div>
-          <div>
-            <div class="field-label" id="rsSortLabel">Sort by</div>
-            <div class="seg seg2" role="radiogroup" aria-labelledby="rsSortLabel">
-              <label><input type="radio" name="stationSort" value="price" checked><span>Price</span></label>
-              <label><input type="radio" name="stationSort" value="along"><span>Along the route</span></label>
-            </div>
-          </div>
           <label for="rsNetwork" class="rs-net">Station network <select id="rsNetwork"></select></label>
         </div>
         <div class="rs-rec rs-body" id="rsRecommend" hidden>
@@ -472,7 +463,6 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
         <div class="msg err rs-body" id="rsMsg" role="status"></div>
         <div class="rs-empty rs-body" id="rsEmpty" hidden>
           <span id="rsEmptyText"></span>
-          <button id="rsWiden" class="quiet" type="button">Try 5 km</button>
         </div>
         <ul class="rs-list rs-body" id="rsList"></ul>
         <button id="rsShowAll" class="quiet rs-body" type="button" hidden></button>
@@ -1412,11 +1402,19 @@ const RS_ROWS = 10;
 const RS_COVERAGE = "Positions are looked up from addresses, so a few stations can't be shown.";
 let rsShowAll = false;
 
-const rsChoice = (name, allowed, fallback) => {
-  const v = store.get(name === "detourKm" ? "fc.detourKm" : "fc.stationSort");
-  return allowed.includes(String(v)) ? String(v) : fallback;
-};
-const rsRadio = (name) => document.querySelector('input[name="' + name + '"]:checked').value;
+// Fixed choices: stations within 2 km of the route, listed in driving order.
+const RS_DETOUR_KM = 2, RS_SORT = "along";
+// Tapping the heading folds the section away so the map has the room; the pins stay.
+function setStationsFolded(folded) {
+  $("routeStations").classList.toggle("collapsed", folded);
+  $("rsToggle").setAttribute("aria-expanded", String(!folded));
+}
+setStationsFolded(store.get("fc.rsFolded") === true);
+$("rsToggle").addEventListener("click", () => {
+  const folded = $("rsToggle").getAttribute("aria-expanded") === "true";
+  setStationsFolded(folded);
+  store.set("fc.rsFolded", folded);
+});
 const rsTown = (a) => String(a || "").split(",")[0].trim();
 
 function clearRouteStations() {
@@ -1435,7 +1433,7 @@ function renderRouteStations() {
     if (typeof drawStationPins === "function") drawStationPins(routeItems, routeRecommendation);
     return;
   }
-  const c = car(), km = Number(rsRadio("detourKm"));
+  const c = car(), km = RS_DETOUR_KM;
   const positioned = lea.stations.some((s) => s.g);
   routeItems = positioned ? RouteStations.sortItems(RouteStations.corridor(lea.stations, routeCoords,
     { field: FIELD[c.fuel], network: $("priceNetwork").value, maxOffKm: km }), "price") : [];
@@ -1446,7 +1444,7 @@ function renderRouteStations() {
 }
 
 function drawRouteStationRows() {
-  const c = car(), km = Number(rsRadio("detourKm")), n = routeItems.length;
+  const c = car(), km = RS_DETOUR_KM, n = routeItems.length;
   const positioned = lea.stations.some((s) => s.g);
   const rec = routeRecommendation;
   $("rsSummary").textContent = n ? n + (n === 1 ? " station" : " stations") + " with a " + FUELS[c.fuel] + " price within " + km + " km of your route"
@@ -1462,11 +1460,10 @@ function drawRouteStationRows() {
   }
   $("rsEmptyText").textContent = positioned ? "No stations with a known position within " + km + " km of this route."
     : "Station positions aren't available yet.";
-  $("rsWiden").hidden = !positioned || km >= 5;
   $("rsEmpty").hidden = n > 0;
   $("rsNote").hidden = !positioned;
 
-  const ordered = RouteStations.sortItems(routeItems, rsRadio("stationSort"));
+  const ordered = RouteStations.sortItems(routeItems, RS_SORT);
   const shown = rsShowAll ? ordered : ordered.slice(0, RS_ROWS);
   const ul = $("rsList");
   ul.innerHTML = "";
@@ -1604,17 +1601,6 @@ $("rsList").addEventListener("click", (e) => {
   if (b && routeItems[b.dataset.i] && typeof focusStationPin === "function") focusStationPin(routeItems[b.dataset.i]);
 });
 $("rsShowAll").addEventListener("click", () => { rsShowAll = true; drawRouteStationRows(); });
-$("rsWiden").addEventListener("click", () => {
-  document.querySelector('input[name="detourKm"][value="5"]').click();
-});
-document.querySelectorAll('input[name="detourKm"], input[name="stationSort"]').forEach((r) => r.addEventListener("change", () => {
-  store.set(r.name === "detourKm" ? "fc.detourKm" : "fc.stationSort", r.value);
-  renderRouteStations();
-}));
-["detourKm", "stationSort"].forEach((name) => {
-  const saved = name === "detourKm" ? rsChoice(name, ["1", "2", "5"], "2") : rsChoice(name, ["price", "along"], "price");
-  document.querySelector('input[name="' + name + '"][value="' + saved + '"]').checked = true;
-});
 
 /* ---------- Measure consumption ---------- */
 

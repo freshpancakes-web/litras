@@ -1052,16 +1052,17 @@ class AppTest(unittest.TestCase):
         self.assertIn("Savanorių pr. 1", first)
         self.assertIn("at 10 km, about 0.5 km off route", first)
 
-    def test_detour_5_km_adds_station(self):
+    def test_no_off_route_or_sort_controls(self):
         page = self.route_with(list(self.stations_trio()))
-        page.locator('label:has(input[name="detourKm"][value="5"])').click()
-        rows = page.locator("#rsList .rs-row")
-        self.assertEqual(rows.count(), 3)
-        self.assertIn("1.700", rows.nth(0).inner_text())
+        self.assertEqual(page.locator('input[name="detourKm"], input[name="stationSort"], #rsWiden').count(), 0)
+        self.assertNotIn("Off route", self.text("routeStations"))
+        self.assertNotIn("Sort by", self.text("routeStations"))
+        self.assertEqual(page.locator("#rsList .rs-row").count(), 2)   # the 3 km station stays out: always 2 km
 
-    def test_sort_along_the_route(self):
-        page = self.route_with(list(self.stations_trio()))
-        page.locator('label:has(input[name="stationSort"][value="along"])').click()
+    def test_list_is_in_driving_order(self):
+        a, b, c = self.stations_trio()
+        c["p"] = 1.75   # cheaper than a, but further along
+        page = self.route_with([a, b, c])
         rows = page.locator("#rsList .rs-row")
         self.assertIn("at 10 km", rows.nth(0).inner_text())
         self.assertIn("at 60 km", rows.nth(1).inner_text())
@@ -1152,17 +1153,13 @@ class AppTest(unittest.TestCase):
         self.assertEqual(self.text("rsMsg"), "A trip can have up to 8 stops.")
         self.assertEqual(page.locator("#stops .stoprow").count(), 8)
 
-    def test_empty_state_and_widen(self):
+    def test_empty_state(self):
         page = self.route_with(list(self.stations_trio()))
         self.add_car(page, "Test LPG", "lpg")
         self.assertTrue(page.locator("#rsEmpty").is_visible())
         self.assertEqual(self.text("rsEmpty").splitlines()[0],
                          "No stations with a known position within 2 km of this route.")
         self.assertTrue(page.locator("#rsList .rs-row").count() == 0)
-        page.click("#rsWiden")
-        self.assertTrue(page.locator('input[name="detourKm"][value="5"]').is_checked())
-        self.assertIn("within 5 km", self.text("rsEmpty"))
-        self.assertTrue(page.locator("#rsWiden").is_hidden())
 
     def test_show_all_after_10(self):
         many = [station("Town%d, Street 1" % i, round(1.8 + i / 1000, 3), 5 + i, 0.3) for i in range(14)]
@@ -1213,16 +1210,21 @@ class AppTest(unittest.TestCase):
         ms = page.evaluate("() => { const t = performance.now(); renderRouteStations(); return performance.now() - t; }")
         self.assertLess(ms, 300)
 
-    def test_choices_are_remembered(self):
-        page = self.route_with(list(self.stations_trio()))
-        page.locator('label:has(input[name="detourKm"][value="5"])').click()
-        page.locator('label:has(input[name="stationSort"][value="along"])').click()
-        self.assertEqual(page.evaluate("localStorage.getItem('fc.detourKm')"), '"5"')
-        self.assertEqual(page.evaluate("localStorage.getItem('fc.stationSort')"), '"along"')
+    def test_old_saved_choices_are_ignored(self):
+        a, b, c = self.stations_trio()
+        c["p"] = 1.75
+        page = self.open(stations=[a, b, c], view="plan")
+        page.evaluate("localStorage.setItem('fc.detourKm', '\"5\"'); localStorage.setItem('fc.stationSort', '\"price\"')")
         page.reload()
         page.wait_for_selector(".leaflet-container")
-        self.assertTrue(page.locator('input[name="detourKm"][value="5"]').is_checked())
-        self.assertTrue(page.locator('input[name="stationSort"][value="along"]').is_checked())
+        self.routes["osrm"] = osrm_straight()
+        page.fill("#origin", "Vilnius")
+        page.fill("#dest", "Kaunas")
+        page.click("#routeBtn")
+        page.wait_for_selector("#routeMsg.ok")
+        rows = page.locator("#rsList .rs-row")
+        self.assertEqual(rows.count(), 2)
+        self.assertIn("at 10 km", rows.nth(0).inner_text())
 
     def test_section_fits_a_phone(self):
         for theme in ("light", "dark"):
@@ -1430,6 +1432,39 @@ class AppTest(unittest.TestCase):
                              "document.getElementById('map').clientHeight]")
         self.assertEqual(size[0], size[2])
         self.assertEqual(size[1], size[3])
+
+    def test_site_address_with_plan_hash_opens_plan_ride(self):
+        page = self.open(stations=list(self.stations_trio()))
+        page.goto(self.base + "/index.html#plan")
+        page.wait_for_selector(".leaflet-container")
+        self.assertTrue(page.url.endswith("/fuel-calculator.html#plan"), page.url)
+        self.assertEqual(page.evaluate("document.documentElement.dataset.view"), "plan")
+
+    def test_stations_heading_folds_the_section(self):
+        page = self.route_with(list(self.stations_trio()))
+        toggle = page.locator("#rsToggle")
+        self.assertEqual(toggle.get_attribute("aria-expanded"), "true")
+        toggle.click()
+        self.assertEqual(toggle.get_attribute("aria-expanded"), "false")
+        for sel in [".rs-opts", "#rsList", "#rsRecommend", "#rsNote"]:
+            self.assertTrue(page.locator(sel).is_hidden(), sel)
+        self.assertTrue(page.locator("#rsSummary").is_visible())
+        self.assertEqual(page.locator(".st-pin").count(), 2)   # the map keeps its pins
+        page.reload()
+        page.wait_for_selector(".leaflet-container")
+        self.assertEqual(page.get_attribute("#rsToggle", "aria-expanded"), "false")   # remembered
+        self.assertTrue(page.locator("#rsPrompt").is_hidden())   # folded hides the prompt too
+        page.click("#rsToggle")
+        self.assertEqual(page.get_attribute("#rsToggle", "aria-expanded"), "true")
+        self.assertTrue(page.locator("#rsPrompt").is_visible())
+
+    def test_stations_heading_works_with_the_keyboard(self):
+        page = self.route_with(list(self.stations_trio()))
+        page.focus("#rsToggle")
+        page.keyboard.press("Enter")
+        self.assertTrue(page.locator("#rsList").is_hidden())
+        page.keyboard.press("Space")
+        self.assertTrue(page.locator("#rsList").is_visible())
 
     def test_unknown_hash_shows_trip_cost(self):
         page = self.open(stations=list(self.stations_trio()))
