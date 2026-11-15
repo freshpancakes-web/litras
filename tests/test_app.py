@@ -133,8 +133,11 @@ class AppTest(unittest.TestCase):
 
     # ----- helpers -----
 
-    def open(self, theme="light", width=1280, height=900, key=None, prices="fixture", history=(), geo="hold", stations=None):
-        """Open the app in a fresh browser context with the outside services mocked."""
+    def open(self, theme="light", width=1280, height=900, key=None, prices="fixture", history=(), geo="hold", stations=None, stations_open=True):
+        """Open the app in a fresh browser context with the outside services mocked.
+
+        The stations list starts folded; most tests want it open, so stations_open
+        sets fc.rsFolded to false unless the page has already saved a choice."""
         self.tile_urls = []
         self.history = list(history)
         self.stations = stations
@@ -145,6 +148,8 @@ class AppTest(unittest.TestCase):
         self.contexts.append(ctx)
         self.context = ctx
         ctx.add_init_script(GEO_STUB.replace("__MODE__", geo))
+        if stations_open:
+            ctx.add_init_script("try { if (localStorage.getItem('fc.rsFolded') === null) localStorage.setItem('fc.rsFolded', 'false'); } catch (e) {}")
         ctx.route(re.compile(r"/config\.js(\?.*)?$"), lambda r: self._config(r, key))
         ctx.route(re.compile(r"/prices\.js(\?.*)?$"), lambda r: self._prices(r, prices))
         ctx.route(re.compile(r"^https://photon\.komoot\.io/"), self._photon)
@@ -1258,15 +1263,56 @@ class AppTest(unittest.TestCase):
         self.assertEqual(page.locator(".st-rec").count(), 1)
         self.assertIn("1.800", page.locator(".st-rec").inner_text())
 
-    def test_dots_when_zoomed_out(self):
+    PIN_SIZE = "e => [getComputedStyle(e).fontSize, Math.round(e.getBoundingClientRect().width)]"
+
+    def test_pins_are_dots_at_every_zoom(self):
         page = self.route_with(list(self.stations_trio()))
         page.wait_for_timeout(800)   # let the route fit settle
-        page.evaluate("map.setView(map.getCenter(), 8, {animate: false})")
-        page.wait_for_function("document.querySelector('#map').classList.contains('st-zoomed-out')")
-        self.assertEqual(page.locator(".st-pin:not(.st-rec)").evaluate("e => getComputedStyle(e).fontSize"), "0px")
-        self.assertNotEqual(page.locator(".st-rec").evaluate("e => getComputedStyle(e).fontSize"), "0px")
-        page.evaluate("map.setView(map.getCenter(), 12, {animate: false})")
-        page.wait_for_function("!document.querySelector('#map').classList.contains('st-zoomed-out')")
+        for zoom in (8, 12, 15):
+            page.evaluate("map.setView(map.getCenter(), %d, {animate: false})" % zoom)
+            for pin in page.locator(".st-pin").all():
+                size = pin.evaluate(self.PIN_SIZE)
+                self.assertEqual(size[0], "0px", zoom)
+                self.assertLessEqual(size[1], 16, zoom)
+
+    def test_hovering_a_dot_shows_its_price(self):
+        page = self.route_with(list(self.stations_trio()))
+        pin = page.locator(".st-pin", has_text="1.900")
+        pin.hover()
+        size = pin.evaluate(self.PIN_SIZE)
+        self.assertEqual(size[0], "11px")
+        self.assertGreaterEqual(size[1], 40)
+        page.mouse.move(5, 5)
+        self.assertEqual(pin.evaluate(self.PIN_SIZE)[0], "0px")
+
+    def test_tapping_a_dot_shows_its_price(self):
+        page = self.route_with(list(self.stations_trio()), width=390, height=844)
+        pin = page.locator(".st-pin", has_text="1.900")
+        pin.scroll_into_view_if_needed()
+        pin.click()
+        page.wait_for_selector(".leaflet-popup")
+        self.assertIn("1.900", page.locator(".leaflet-popup").inner_text())
+        page.mouse.move(5, 5)
+        self.assertEqual(pin.evaluate(self.PIN_SIZE)[0], "11px")   # stays revealed while selected
+
+    def test_dots_are_easy_to_tap(self):
+        page = self.route_with(list(self.stations_trio()))
+        pin = page.locator(".st-pin", has_text="1.900")
+        pin.scroll_into_view_if_needed()
+        box = pin.bounding_box()
+        cx, cy = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+        hit = page.evaluate("([x, y]) => !!document.elementFromPoint(x, y).closest('.st-pin')", [cx + 13, cy])
+        self.assertTrue(hit)   # a 12 px dot still has a finger-sized target around it
+
+    def test_stations_list_is_folded_by_default(self):
+        page = self.route_with(list(self.stations_trio()), stations_open=False)
+        self.assertEqual(page.get_attribute("#rsToggle", "aria-expanded"), "false")
+        self.assertTrue(page.locator("#rsSummary").is_visible())
+        self.assertTrue(page.locator("#rsList").is_hidden())
+        self.assertEqual(page.locator(".st-pin").count(), 2)
+        page.click("#rsToggle")
+        self.assertTrue(page.locator("#rsList").is_visible())
+        self.assertEqual(page.evaluate("localStorage.getItem('fc.rsFolded')"), "false")
 
     def test_row_and_pin_highlight_each_other(self):
         page = self.route_with(list(self.stations_trio()))
