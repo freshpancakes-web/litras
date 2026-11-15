@@ -47,6 +47,31 @@ class RouteStationsTest(unittest.TestCase):
         cls.server.shutdown()
         cls.server.server_close()
 
+    # ----- drive-split.js: city / mixed / highway from route speeds -----
+
+    def test_classify_bands(self):
+        split = self.page.evaluate("""DriveSplit.classify([
+            {meters: 1000, seconds: 72},             // 50 km/h
+            {meters: 1000, seconds: 60},             // 60 km/h, mixed
+            {meters: 1000, seconds: 3.6 * 1000 / 85}, // 85 km/h, mixed
+            {meters: 1000, seconds: 36}])""")        # 100 km/h
+        self.assertEqual(split, {"city": 1000, "mixed": 2000, "highway": 1000})
+
+    def test_zero_duration_counts_as_mixed(self):
+        self.assertEqual(self.page.evaluate("DriveSplit.classify([{meters: 500, seconds: 0}])"),
+                         {"city": 0, "mixed": 500, "highway": 0})
+
+    def test_weighted_consumption(self):
+        v = self.page.evaluate("DriveSplit.consumption({city: 10000, mixed: 0, highway: 30000}, {city: 8, mixed: 6, highway: 5})")
+        self.assertAlmostEqual(v, 5.75)
+
+    def test_empty_split_uses_mixed(self):
+        self.assertEqual(self.page.evaluate("DriveSplit.consumption({city: 0, mixed: 0, highway: 0}, {city: 8, mixed: 6, highway: 5})"), 6)
+
+    def test_add_splits(self):
+        self.assertEqual(self.page.evaluate("DriveSplit.add({city: 1, mixed: 2, highway: 3}, {city: 10, mixed: 20, highway: 30})"),
+                         {"city": 11, "mixed": 22, "highway": 33})
+
     def call(self, expr, arg=None):
         return self.page.evaluate("a => RouteStations." + expr, arg)
 

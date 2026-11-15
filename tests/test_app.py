@@ -55,6 +55,15 @@ def osrm_straight():
     }]}
 
 
+def osrm_with_speeds():
+    """One 100 km leg: 20 km at 50 km/h, then 80 km at 90 km/h."""
+    r = osrm_straight()
+    r["routes"][0].update({"distance": 100000, "duration": 4640})
+    r["routes"][0]["legs"] = [{"distance": 100000, "duration": 4640,
+                               "annotation": {"distance": [20000, 80000], "duration": [1440, 3200]}}]
+    return r
+
+
 def station(addr, price, along_km, off_km, c="Test Oil", field="p"):
     """A station along_km east of the route start and off_km north of the route."""
     return {"c": c, "m": "Kauno m. sav.", "a": addr, field: price,
@@ -1414,6 +1423,31 @@ class AppTest(unittest.TestCase):
         self.assertTrue(page.locator("#rsList").is_visible())
 
     # ----- secrets -----
+
+    # ----- driving type from route speeds -----
+
+    def route_speeds(self, **kw):
+        page = self.open(**kw)
+        self.routes["osrm"] = osrm_with_speeds()
+        page.fill("#origin", "Vilnius")
+        page.fill("#dest", "Kaunas")
+        page.click("#routeBtn")
+        page.wait_for_selector("#routeMsg.ok")
+        return page
+
+    def test_route_request_asks_for_speeds_and_legs_carry_a_split(self):
+        page = self.route_speeds()
+        self.assertIn("annotations=distance,duration", self.osrm_requests[-1])
+        self.assertEqual(page.evaluate("lastRoute.legs[0].split"), {"city": 20000, "mixed": 0, "highway": 80000})
+
+    def test_leg_without_speed_details_uses_its_average(self):
+        page = self.open()
+        self.routes["osrm"] = osrm_legs([(100000, 4200)])   # about 86 km/h
+        page.fill("#origin", "Vilnius")
+        page.fill("#dest", "Kaunas")
+        page.click("#routeBtn")
+        page.wait_for_selector("#routeMsg.ok")
+        self.assertEqual(page.evaluate("lastRoute.legs[0].split"), {"city": 0, "mixed": 0, "highway": 100000})
 
     def test_no_secret_tracked(self):
         out = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, check=True, capture_output=True).stdout

@@ -556,6 +556,7 @@ button.loc-btn { position: absolute; top: -1px; right: 0; z-index: 1; font-size:
 <script src="config.js"></script>   <!-- optional, local only: window.FC_CONFIG = { cartoKey } -->
 <script src="prices.js"></script>
 <script src="route-stations.js"></script>
+<script src="drive-split.js"></script>
 <script>
 /* ---------- Configuration ---------- */
 
@@ -1061,7 +1062,7 @@ let stopSeq = 0;
 let routeCoords = null;      // the calculated route as [lat, lng] points, or null when there is no route to measure against
 let routeItems = [];         // stations along the route in the chosen order (RouteStations.corridor items)
 let routeRecommendation = null;   // RouteStations.recommend result for routeItems
-let lastRoute = null;        // { legs: [{ meters, seconds }], names: [...] } from the last calculated route
+let lastRoute = null;        // { legs: [{ meters, seconds, split }], names: [...] } from the last calculated route
 
 const pinLetter = (i) => String.fromCharCode(65 + i);
 const shortName = (label) => (label || "").split(",")[0].trim() || "?";
@@ -1288,11 +1289,14 @@ async function fetchRoute(points) {
     if (!f) throw new Error("No driving route found.");
     return {
       meters: f.properties.summary.distance, seconds: f.properties.summary.duration, coords: f.geometry.coordinates,
-      legs: (f.properties.segments || []).map((s) => ({ meters: s.distance, seconds: s.duration }))
+      legs: (f.properties.segments || []).map((s) => ({ meters: s.distance, seconds: s.duration,
+        split: DriveSplit.classify(s.steps && s.steps.length
+          ? s.steps.map((st) => ({ meters: st.distance, seconds: st.duration }))
+          : [{ meters: s.distance, seconds: s.duration }]) }))
     };
   }
   const url = "https://router.project-osrm.org/route/v1/driving/" + points.map((p) => p.lng + "," + p.lat).join(";") +
-    "?overview=full&geometries=geojson";
+    "?overview=full&geometries=geojson&annotations=distance,duration";
   const res = await fetch(url);
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data.code !== "Ok" || !data.routes || !data.routes.length) {
@@ -1301,7 +1305,13 @@ async function fetchRoute(points) {
   const r = data.routes[0];
   return {
     meters: r.distance, seconds: r.duration, coords: r.geometry.coordinates,
-    legs: (r.legs || []).map((l) => ({ meters: l.distance, seconds: l.duration }))
+    legs: (r.legs || []).map((l) => {
+      const a = l.annotation;
+      const pieces = a && Array.isArray(a.distance) && Array.isArray(a.duration) && a.distance.length
+        ? a.distance.map((m, i) => ({ meters: m, seconds: a.duration[i] }))
+        : [{ meters: l.distance, seconds: l.duration }];   // no speed details: the leg's own average
+      return { meters: l.distance, seconds: l.duration, split: DriveSplit.classify(pieces) };
+    })
   };
 }
 
